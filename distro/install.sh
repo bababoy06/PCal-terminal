@@ -1,4 +1,6 @@
 #!/bin/sh
+# Copyright (C) 2026 bababoy06 and Pontes-Calos contributors
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Pontes-Calos installer: turns a fresh Alpine Linux install into a RetroMenu machine.
 #
 #   doas sh distro/install.sh [options] [USER]
