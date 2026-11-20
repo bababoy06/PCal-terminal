@@ -2,6 +2,14 @@
 
 A lightweight, speed-optimized Linux (Alpine-based) with a retro green-CRT, arrow-key home menu and login screen.
 
+![The Pontes-Calos main menu](docs/media/menu-idle.png)
+
+| Startup | Shutdown |
+|---|---|
+| ![Startup: the picture opens from a bright line, the boot screen types its checks, then the menu appears](docs/media/startup.gif) | ![Shutdown: moving to Log out with the phosphor afterglow, then the picture collapses to a line and a dot](docs/media/shutdown.gif) |
+
+*Recorded from the real program with Settings > Effects set to FULL.*
+
 ## Components
 
 - [`retromenu/`](retromenu/): the programs. Pure Python stdlib.
