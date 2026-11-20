@@ -1,4 +1,4 @@
-# Pontes-Calos
+# Pontes-Calos (PCal v0.5)
 
 A lightweight, speed-optimized Linux (Alpine-based) with a retro green-CRT, arrow-key home menu and login screen.
 
