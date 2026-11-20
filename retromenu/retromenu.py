@@ -945,7 +945,7 @@ class App:
         items += [
             item("Settings", self.settings, desc="Customize this home screen"),
             item("Reboot", self.reboot, desc="Restart the system"),
-            item("Exit", lambda: EXIT, desc="Leave the menu"),
+            item("Log out", lambda: EXIT, desc="Back to the login screen"),
         ]
         return items
 
