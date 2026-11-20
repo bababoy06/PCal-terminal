@@ -126,7 +126,7 @@ def put(win, y, x, text, attr=0):
 
 
 class LoginScreen:
-    def __init__(self, scr, default_user, theme):
+    def __init__(self, scr, default_user, theme, effects="subtle"):
         self.scr = scr
         self.user = default_user
         self.password = ""
@@ -134,6 +134,7 @@ class LoginScreen:
         self.message = ""
         self.fails = 0
         self.locked_until = 0
+        self.fx = effects if effects in ("off", "subtle", "full") else "subtle"
         self.host = socket.gethostname().split(".")[0]
         try:
             self.tty = os.path.basename(os.ttyname(0))
@@ -179,7 +180,7 @@ class LoginScreen:
             self.dim, self.sel = curses.A_DIM, curses.A_REVERSE
         self.scr.bkgd(" ", self.norm)
 
-    def draw(self, busy=None):
+    def draw(self, busy=None, refresh=True):
         H, W = self.scr.getmaxyx()
         B = self.B
         self.scr.erase()
@@ -231,7 +232,54 @@ class LoginScreen:
         clock = "  " + time.strftime("%Y-%m-%d %H:%M:%S ")
         room = max(0, W - len(clock))
         put(self.scr, H - 1, 0, (info[:room].ljust(room) + clock)[:W], self.sel)
-        self.scr.refresh()
+        if refresh:
+            self.scr.refresh()
+
+    # ---- CRT effects (same as RetroMenu; follows the user's Settings > Effects)
+    def crt(self, on=True, busy=None):
+        """Old monitor power on/off: the picture opens from (or collapses into) a bright line."""
+        if self.fx == "off":
+            return
+        full = self.fx == "full"
+        H, W = self.scr.getmaxyx()
+        mid = H // 2
+        steps = 8 if full else 5
+        frames = [("band", max(1, -(-mid * i // steps))) for i in range(1, steps + 1)]
+        if full:
+            frames = [("line", max(1, W * i // 6)) for i in range(1, 7)] + frames
+        if not on:
+            frames.reverse()
+            frames.append(("dot", 0))
+        for kind, v in frames:
+            if kind == "band":
+                self.draw(busy=busy, refresh=False)
+                for r in range(H):
+                    if abs(r - mid) > v:
+                        put(self.scr, r, 0, " " * W, self.norm)
+                for r in (mid - v, mid + v):
+                    if 0 <= r < H and v < mid:
+                        put(self.scr, r, 0, self.B["h"] * W, self.bold)
+            else:
+                self.scr.erase()
+                if kind == "line":
+                    put(self.scr, mid, (W - v) // 2, self.B["h"] * v, self.bold)
+                else:
+                    put(self.scr, mid, W // 2, self.B["block"], self.bold)
+            self.scr.refresh()
+            time.sleep(0.025 if kind == "line" else 0.03)
+        if not on:
+            time.sleep(0.08)
+            self.scr.erase()
+            self.scr.refresh()
+
+    def say(self, msg):
+        """Show a status message; with full effects it is typed out."""
+        if self.fx == "full":
+            for i in range(0, len(msg), 2):
+                self.message = msg[:i] + self.B["block"]
+                self.draw()
+                time.sleep(0.012)
+        self.message = msg
 
     def progress(self, label, seconds):
         steps = max(1, int(seconds / 0.05))
@@ -249,6 +297,7 @@ class LoginScreen:
 
     def run(self):
         """Returns the user name once the right password was given."""
+        self.crt(on=True)
         while True:
             self.draw()
             self.scr.timeout(1000)
@@ -293,25 +342,27 @@ class LoginScreen:
                 if user and check_password(user, password):
                     self.fails = 0
                     self.progress("ACCESS GRANTED", 0.4)
+                    self.crt(on=False, busy="ACCESS GRANTED")
                     return user
                 self.fails += 1
                 self.progress("VERIFYING...", DELAY_AFTER_FAIL)
                 if CRYPT is None:
-                    self.message = "ERROR: NO crypt() ON THIS SYSTEM -- USE Alt+F2"
+                    self.say("ERROR: NO crypt() ON THIS SYSTEM -- USE Alt+F2")
                 else:
-                    self.message = f"ACCESS DENIED ({self.fails})"
+                    self.say(f"ACCESS DENIED ({self.fails})")
                 if self.fails % LOCK_AFTER == 0:
                     self.locked_until = time.time() + LOCK_SECONDS
 
 
-def theme_for(user):
-    """Use the theme the user picked in RetroMenu, so login and menu match."""
+def user_settings(user):
+    """Use the theme and effects the user picked in RetroMenu, so login and menu match."""
     try:
         home = pwd.getpwnam(user).pw_dir
         with open(os.path.join(home, ".config", "retromenu", "config.json")) as f:
-            return json.load(f).get("theme", "green")
+            cfg = json.load(f)
+        return cfg.get("theme", "green"), cfg.get("effects", "subtle")
     except (KeyError, OSError, ValueError, AttributeError):
-        return "green"
+        return "green", "subtle"
 
 
 def main():
@@ -337,7 +388,8 @@ def main():
     except locale.Error:
         locale.setlocale(locale.LC_ALL, "C")
 
-    user = curses.wrapper(lambda scr: LoginScreen(scr, default_user, theme_for(default_user)).run())
+    theme, effects = user_settings(default_user)
+    user = curses.wrapper(lambda scr: LoginScreen(scr, default_user, theme, effects).run())
     # Hand over: login -f skips its own password prompt (we already checked) and
     # sets up the session, utmp, HOME and the user's shell.
     os.execv(login_cmd, [os.path.basename(login_cmd), "-f", user])

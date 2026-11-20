@@ -42,6 +42,11 @@ The `user@host:~$` line under the main menu is a real prompt.
 - `ls -l` style file view with permissions, size, modified date and name. It switches to size + name on narrow screens.
 - Themes: green, amber, white, cyan. Uses 256 colours when the terminal supports them.
 - On the real Linux console (`TERM=linux`), the menu repaints the console's own palette into phosphor green or amber, and restores it on exit. This can be turned off in Settings > Console palette.
+- **CRT effects** (Settings > Effects: `OFF` / `SUBTLE` / `FULL`, default subtle). The login screen follows the same setting.
+  - *Power on/off*: at start the picture opens from a bright line, like an old monitor warming up. On Log out and Reboot it collapses to a line, then a dot, then black.
+  - *Phosphor afterglow*: the row you move away from fades out over about 0.2 s instead of switching off at once.
+  - *Full* adds the dot-to-line warm-up, typewriter text on the boot screen and login messages, and on the real Linux console a rare one-frame flicker.
+  - Every effect lasts a fraction of a second and never blocks your keys for longer. Choose `OFF` for the fastest possible screens.
 - For CRT glow, scanlines and curvature on a desktop, run it inside [cool-retro-term](https://github.com/Swordfish90/cool-retro-term).
 
 ## Plugins
