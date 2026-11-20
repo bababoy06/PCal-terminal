@@ -4,7 +4,7 @@ A lightweight, speed-optimized Linux (Alpine-based) with a retro green-CRT, arro
 
 ## Components
 
-- [`retromenu/`](retromenu/): the home screen (file manager, terminal, htop shortcut, plugins, settings, reboot). Pure Python stdlib.
+- [`retromenu/`](retromenu/): the home screen (file manager, terminal, system monitor shortcut (top), plugins, settings, reboot). Pure Python stdlib.
 
 ## Roadmap
 
