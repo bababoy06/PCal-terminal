@@ -1,0 +1,12 @@
+{
+  "name": "Network",
+  "command": "nmtui",
+  "options": [
+    { "label": "Show IP addresses", "command": "ip -c a", "pause": true },
+    { "label": "Ping test", "command": "ping -c 4 1.1.1.1", "pause": true },
+    { "label": "Diagnostics", "options": [
+      { "label": "Routes", "command": "ip route", "pause": true },
+      { "label": "DNS config", "command": "cat /etc/resolv.conf", "pause": true }
+    ]}
+  ]
+}
