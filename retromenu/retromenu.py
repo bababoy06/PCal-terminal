@@ -702,7 +702,7 @@ class App:
                 if focus:
                     hints = "-- INSERT --  ENTER run  !cmd full terminal  UP/DN history  ESC menu"
                 elif root:
-                    hints = "UP/DN move  RIGHT/ENTER select  i command line"
+                    hints = "UP/DN move  RIGHT/ENTER select  i command line  t terminal"
                 else:
                     hints = "UP/DN move  RIGHT/ENTER select  LEFT back"
                 self.status(H, W, hints)
@@ -724,6 +724,9 @@ class App:
                 continue
             if root and geo["console"] and k in ("i", 9):
                 focus = True  # vim style: i (or TAB) = insert mode in the command line
+                continue
+            if root and k == "t":  # t = full terminal, in the command line's folder
+                self.open_terminal(self.con_cwd)
                 continue
             if isinstance(k, str):
                 k = ord(k)  # vim keys (h j k l q) in the other screens
@@ -1223,7 +1226,7 @@ class FileManager:
                     put(a.scr, over - 1, 3, f"CANNOT READ FOLDER: {self.error}", a.bold)
                 elif n == 0:
                     put(a.scr, over - 1, 3, "(EMPTY FOLDER - PRESS ENTER FOR OPTIONS)", a.dim)
-                a.status(H, W, "ENTER actions  RIGHT open  LEFT up  . hidden  q menu")
+                a.status(H, W, "ENTER actions  RIGHT open  LEFT up  t terminal  . hidden  q menu")
                 a.scr.noutrefresh()
                 self.name_x = (sum(widths) + len(widths) + 4) if wide else 14
                 self.body_y = over - 1
@@ -1263,6 +1266,8 @@ class FileManager:
                 return
             elif k == ord("."):
                 a.set("show_hidden", not a.cfg["show_hidden"])
+            elif k == ord("t"):  # terminal in the folder you're looking at
+                a.open_terminal(self.cwd)
 
     # ---- navigation
     def enter(self, ent):
