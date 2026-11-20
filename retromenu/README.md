@@ -16,7 +16,7 @@ Keys: `UP/DOWN` move, `RIGHT/ENTER` open, `LEFT/ESC/q` back, `PGUP/PGDN` scroll.
 |-------------|--------------|
 | Files       | File manager starting in `~`. RIGHT enters a folder, LEFT goes up, ENTER opens the action drop-down (Open with >, Open terminal here, Details, New >, Rename, Delete >, Refresh). `.` toggles hidden files. |
 | Terminal    | Your shell. Type `exit` to come back. |
-| Htop        | Runs `htop` by default. Name and command can be changed in Settings. |
+| Top         | Runs `top` by default (available on every system). Change it to `htop`, `btop` or anything else in Settings. |
 | Plugins     | One entry per JSON file in `~/.config/retromenu/plugins/` (see `plugins/network.json`). Shows "Placeholder" when there are none. |
 | Settings    | Theme (green/amber/white/cyan), monitor, shell, editor, pager, hidden files, splash, reboot command. Saved to `~/.config/retromenu/config.json`. |
 | Reboot      | Asks for confirmation, then uses `doas`/`sudo` if needed (password prompt). |
@@ -40,7 +40,7 @@ A program can also list its own options with `"options_cmd": "myprog --retromenu
 ## Make it the home screen on Alpine
 
 ```sh
-apk add python3 htop less
+apk add python3 less
 install -m755 retromenu.py /usr/local/bin/retromenu
 mkdir -p ~/.config/retromenu/plugins && cp plugins/*.json ~/.config/retromenu/plugins/
 ```

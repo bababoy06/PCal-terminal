@@ -34,8 +34,8 @@ PLUGIN_DIR = os.path.join(CONFIG_DIR, "plugins")
 
 DEFAULT_CONFIG = {
     "theme": "green",
-    "monitor_name": "Htop",
-    "monitor_cmd": "htop",
+    "monitor_name": "Top",
+    "monitor_cmd": "top",
     "shell": os.environ.get("SHELL") or "/bin/sh",
     "editor": os.environ.get("EDITOR") or "vi",
     "pager": "less",
