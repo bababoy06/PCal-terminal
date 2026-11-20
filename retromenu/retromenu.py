@@ -18,6 +18,7 @@ import locale
 import mimetypes
 import os
 import pwd
+import random
 import re
 import shlex
 import shutil
@@ -29,7 +30,7 @@ import sys
 import textwrap
 import time
 
-VERSION = "0.4"
+VERSION = "0.5"
 SYSTEM_NAME = "PONTES-CALOS"
 TAGLINE = "A PONTES-CALOS SYSTEM"
 COPYRIGHT = "(C) PONTES-CALOS DATA SYSTEMS"
@@ -65,6 +66,7 @@ DEFAULT_CONFIG = {
     "pager": "less",
     "show_hidden": False,
     "splash": True,
+    "effects": "subtle",  # off | subtle | full
     "console_palette": True,
     "reboot_cmd": "reboot",
 }
@@ -258,6 +260,21 @@ def console_palette(theme):
         pass
 
 
+def console_flicker(theme):
+    """One frame of a slightly dimmer phosphor, like an old tube (Linux console only)."""
+    if os.environ.get("TERM") != "linux":
+        return
+    base = THEMES.get(theme, THEMES["green"])[0]
+    normal = THEMES.get(theme, THEMES["green"])[2][1]
+    dimmer = "".join(f"{int(int(normal[i:i + 2], 16) * 0.8):02x}" for i in (0, 2, 4))
+    try:
+        os.write(sys.stdout.fileno(), f"\033]P{base:X}{dimmer}".encode())
+        time.sleep(0.04)
+    except OSError:
+        pass
+    console_palette(theme)
+
+
 def console_palette_reset():
     if os.environ.get("TERM") == "linux":
         try:
@@ -323,6 +340,8 @@ class App:
             curses.start_color()
         self.apply_theme()
         self.files = FileManager(self)
+        self.glow = {}  # table key -> (selected row, previous row, time of the change)
+        self.powered = False  # has the power-on animation run yet?
         # command line state (kept while you move around the menus)
         self.con_cwd = os.path.expanduser("~")
         self.con_buf, self.con_cur, self.con_out, self.con_top, self.con_rows = "", 0, [], 0, 0
@@ -357,12 +376,91 @@ class App:
         self.scr.bkgd(" ", self.norm)
 
     # ---- the boxed table: used for every menu, popup and dialog
+    # ---- CRT effects (Settings > Effects: off / subtle / full)
+    GLOW_TIME = 0.22
+
+    @property
+    def fx(self):
+        v = self.cfg.get("effects", "subtle")
+        return v if v in ("off", "subtle", "full") else "subtle"
+
+    def afterglow(self, key, sel):
+        """Phosphor afterglow: the row you just left fades out instead of switching off."""
+        if key is None or self.fx == "off":
+            return -1, None
+        now = time.monotonic()
+        state = self.glow.get(key)
+        if state is None:
+            self.glow[key] = (sel, -1, 0.0)
+        elif state[0] != sel:
+            self.glow[key] = (sel, state[0], now)
+        _, prev, t0 = self.glow[key]
+        age = now - t0
+        if prev < 0 or prev == sel or age >= self.GLOW_TIME:
+            return -1, None
+        if age < self.GLOW_TIME / 3:
+            return prev, self.sel | curses.A_DIM  # the bar is still fading
+        return prev, self.bold
+
+    def anim_timeout(self, default):
+        """Wake up quickly while an afterglow is still fading, otherwise use `default`."""
+        now = time.monotonic()
+        if any(now - t0 < self.GLOW_TIME for _, _, t0 in self.glow.values()):
+            return 30
+        return default
+
+    def crt(self, draw, on=True):
+        """Old monitor power on/off: the picture opens from (or collapses into) a bright line."""
+        if self.fx == "off":
+            return
+        full = self.fx == "full"
+        H, W = self.scr.getmaxyx()
+        mid = H // 2
+        steps = 8 if full else 5
+        frames = [("band", max(1, -(-mid * i // steps))) for i in range(1, steps + 1)]
+        if full:
+            frames = [("line", max(1, W * i // 6)) for i in range(1, 7)] + frames
+        if not on:
+            frames.reverse()
+            frames.append(("dot", 0))
+        line = self.B["h"]
+        try:
+            for kind, v in frames:
+                if kind == "band":
+                    draw()
+                    for r in range(H):
+                        if abs(r - mid) > v:
+                            put(self.scr, r, 0, " " * W, self.norm)
+                    for r in (mid - v, mid + v):
+                        if 0 <= r < H and v < mid:
+                            put(self.scr, r, 0, line * W, self.bold)
+                else:
+                    self.scr.erase()
+                    if kind == "line":
+                        put(self.scr, mid, (W - v) // 2, line * v, self.bold)
+                    else:
+                        put(self.scr, mid, W // 2, self.B["block"], self.bold)
+                self.scr.noutrefresh()
+                curses.doupdate()
+                time.sleep(0.025 if kind == "line" else 0.03)
+            if not on:
+                time.sleep(0.08)
+                self.scr.erase()
+                self.scr.refresh()
+        except curses.error:
+            pass
+
+    def maybe_flicker(self):
+        """Full effects on the Linux console: now and then the tube flickers for one frame."""
+        if self.fx == "full" and self.cfg.get("console_palette") and random.random() < 0.03:
+            console_flicker(self.cfg.get("theme"))
+
     @staticmethod
     def table_overhead(title, headers):
         return 2 + (2 if title else 0) + (2 if headers else 0)
 
     def draw_table(self, win, y, x, h, w, n, row_at, sel=-1, top=0, title=None,
-                   headers=None, widths=(), pointer=True, footer=None):
+                   headers=None, widths=(), pointer=True, footer=None, glow_key=None):
         """
         Double-line box like an old terminal reference card.
         widths: widths of every column except the last, which takes the rest.
@@ -403,6 +501,7 @@ class App:
             put(win, row + 1, x, hline(B["lt"], B["rt"], B["x"]), self.norm)
             row += 2
         body = max(0, y + h - 1 - row)
+        glow_idx, glow_attr = self.afterglow(glow_key, sel)
         for i in range(body):
             idx = top + i
             if idx < n:
@@ -411,7 +510,7 @@ class App:
                 if pointer and values:
                     values[0] = (B["ptr"] + " " if idx == sel else "  ") + values[0]
                 line = cells(values)
-                a = self.sel if idx == sel else (attr or self.norm)
+                a = self.sel if idx == sel else (glow_attr if idx == glow_idx else (attr or self.norm))
             else:
                 line, a = cells([""]), self.norm
             put(win, row + i, x, B["v"], self.norm)
@@ -665,6 +764,7 @@ class App:
     # ---- generic full-screen menu (main menu, settings)
     def menu_screen(self, title, build, headers=("OPTION", "DESCRIPTION"), root=False):
         sel, top = 0, 0
+        self.glow.pop("menu:" + title, None)
         geo = {"console": False}
         focus = False  # True while typing in the command line (main menu only)
         while True:
@@ -692,7 +792,7 @@ class App:
                 body = th - over
                 _, top = clamp_scroll(sel, top, body, n)
                 self.draw_table(self.scr, y, tx, th, tw, n, row_at, -1 if focus else sel, top,
-                                title=title, headers=headers, widths=(c1,))
+                                title=title, headers=headers, widths=(c1,), glow_key="menu:" + title)
                 keep_footer = H >= 20 and not (root and self.con_out)
                 geo["console"] = root and y + th + 1 < H - 2
                 if geo["console"]:
@@ -710,13 +810,19 @@ class App:
                 geo.update(y=y + over - 1, x=tx + c1 + 1, w=tw, body=body)
 
             self.bg = draw
+            if not self.powered:  # first screen after start: switch the "monitor" on
+                self.powered = True
+                self.crt(draw, on=True)
             draw()
             curses.doupdate()
-            self.scr.timeout(500)  # wake up for the clock and the blinking cursor
+            self.scr.timeout(self.anim_timeout(500))  # clock, blinking cursor, afterglow
             k = self.read_key(self.scr)
             self.scr.timeout(-1)
 
-            if k in (-1, curses.KEY_RESIZE):
+            if k == -1:
+                self.maybe_flicker()
+                continue
+            if k == curses.KEY_RESIZE:
                 continue
             if focus:
                 if self.console_key(k) == "menu":
@@ -745,6 +851,7 @@ class App:
             elif k in K_FWD or k in K_ENTER:
                 y = geo["y"] + sel - top
                 if self.open_item(items[sel], y, geo["x"], draw) is EXIT:
+                    self.crt(draw, on=False)  # switch the "monitor" off
                     return EXIT
             elif k in K_BACK and not root:
                 return None
@@ -784,19 +891,25 @@ class App:
         win.bkgd(" ", self.norm)
         sel, top = 0, 0
         body = h - over
+        gkey = f"popup:{y}:{x}"
+        self.glow.pop(gkey, None)
 
         def draw():
             nonlocal top
             _, top = clamp_scroll(sel, top, body, n)
             win.erase()
-            self.draw_table(win, 0, 0, h, w, n, row_at, sel, top, title=title)
+            self.draw_table(win, 0, 0, h, w, n, row_at, sel, top, title=title, glow_key=gkey)
             win.noutrefresh()
 
         while True:
             redraw()
             draw()
             curses.doupdate()
+            win.timeout(self.anim_timeout(-1))
             k = win.getch()
+            win.timeout(-1)
+            if k == -1:
+                continue
             if k in K_UP:
                 sel = (sel - 1) % n
             elif k in K_DOWN:
@@ -1050,6 +1163,9 @@ class App:
                 item("Hidden files", lambda: self.set("show_hidden", not c["show_hidden"]),
                      desc=onoff(c["show_hidden"])),
                 item("Boot splash", lambda: self.set("splash", not c["splash"]), desc=onoff(c["splash"])),
+                item("Effects", desc=self.fx.upper() + "  (CRT power on/off, afterglow)",
+                     sub=lambda: [item(v.upper(), lambda v=v: self.set("effects", v))
+                                  for v in ("off", "subtle", "full")]),
                 item("Console palette", lambda: self.set("console_palette", not c["console_palette"]),
                      desc=onoff(c["console_palette"]) + " (Linux console only)"),
                 item("Reboot command", lambda: self.edit("reboot_cmd", "Reboot command"),
@@ -1075,6 +1191,7 @@ class App:
                 if shutil.which(elevate):
                     cmd = f"{elevate} {cmd}"  # asks for the password in the terminal
                     break
+        self.crt(self.bg, on=False)
         self.run(cmd, pause=True, note="\n[ Rebooting... ]\n")
 
     # ---- boot screen (does real work while it draws)
@@ -1100,10 +1217,19 @@ class App:
             ("HOME DIRECTORY", home),
         ]
         show = self.cfg.get("splash")
+        if show:
+            self.powered = True
+            self.crt(lambda: self.draw_splash([], 0, refresh=False), on=True)
+        typewriter = self.fx == "full"
         for i, (label, fn) in enumerate(steps):
             step(label, fn)
             if show:
-                self.draw_splash(log, (i + 1) / (len(steps) + 1))
+                progress = (i + 1) / (len(steps) + 1)
+                if typewriter:  # the new line is typed out, like an old terminal
+                    for c in range(0, 48, 4):
+                        self.draw_splash(log, progress, typed=c)
+                        time.sleep(0.008)
+                self.draw_splash(log, progress)
                 time.sleep(0.05)
         if show:
             for f in range(4):  # finish the bar
@@ -1111,7 +1237,7 @@ class App:
                 time.sleep(0.03)
             time.sleep(0.15)
 
-    def draw_splash(self, log, progress):
+    def draw_splash(self, log, progress, typed=None, refresh=True):
         H, W = self.scr.getmaxyx()
         self.scr.erase()
         bw = len(BANNER[0])
@@ -1127,6 +1253,11 @@ class App:
         lx = max(1, (W - 44) // 2)
         for j, (label, result) in enumerate(log):
             dots = "." * max(2, 30 - len(label))
+            if typed is not None and j == len(log) - 1:  # typewriter: show only part of the last line
+                text = f"{label} {dots} {result}"[:typed]
+                put(self.scr, y + 8 + j, lx, text, self.norm)
+                put(self.scr, y + 8 + j, lx + len(text), self.B["block"], self.bold)
+                continue
             put(self.scr, y + 8 + j, lx, f"{label} {dots} ", self.norm)
             put(self.scr, y + 8 + j, lx + len(label) + len(dots) + 2, result, self.bold)
         bar_w = max(10, min(44, W - 4))
@@ -1135,7 +1266,8 @@ class App:
         put(self.scr, by, (W - bar_w) // 2, self.B["block"] * filled, self.bold)
         put(self.scr, by, (W - bar_w) // 2 + filled, self.B["shade"] * (bar_w - filled), self.dim)
         put(self.scr, min(H - 1, by + 3), max(0, (W - len(COPYRIGHT)) // 2), COPYRIGHT, self.dim)
-        self.scr.refresh()
+        if refresh:
+            self.scr.refresh()
 
 
 # ---------------------------------------------------------------- file manager
@@ -1220,6 +1352,7 @@ class FileManager:
                 self.body = max(1, H - 1 - over)
                 self.sel, self.top = clamp_scroll(self.sel, self.top, self.body, n)
                 a.draw_table(a.scr, 0, 0, H - 1, W, n, lambda i: self.row(i, wide), self.sel, self.top,
+                             glow_key="files:" + self.cwd,
                              title=title, headers=headers, widths=widths,
                              footer=f"{n} ITEM" + ("" if n == 1 else "S") + ("  +HIDDEN" if a.cfg["show_hidden"] else ""))
                 if self.error:
@@ -1235,7 +1368,7 @@ class FileManager:
             a.bg = draw
             draw()
             curses.doupdate()
-            a.scr.timeout(1000)
+            a.scr.timeout(a.anim_timeout(1000))
             k = a.scr.getch()
             a.scr.timeout(-1)
 
