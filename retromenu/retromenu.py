@@ -18,8 +18,10 @@ import locale
 import mimetypes
 import os
 import pwd
+import re
 import shlex
 import shutil
+import signal
 import socket
 import stat
 import subprocess
@@ -27,7 +29,7 @@ import sys
 import textwrap
 import time
 
-VERSION = "0.2"
+VERSION = "0.3"
 SYSTEM_NAME = "PONTES-CALOS"
 TAGLINE = "A PONTES-CALOS SYSTEM"
 COPYRIGHT = "(C) PONTES-CALOS DATA SYSTEMS"
@@ -35,6 +37,24 @@ COPYRIGHT = "(C) PONTES-CALOS DATA SYSTEMS"
 CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "retromenu")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 PLUGIN_DIR = os.path.join(CONFIG_DIR, "plugins")
+HISTORY_FILE = os.path.join(CONFIG_DIR, "history")
+HISTORY_MAX = 500
+
+# Command line under the main menu: quick commands show their output inline;
+# these need a real terminal, so they take over the screen instead.
+CONSOLE_TIMEOUT = 5
+CONSOLE_MAX_LINES = 500
+FULLSCREEN_CMDS = {  # full-screen programs: no "press ENTER" afterwards
+    "vi", "vim", "nvim", "nano", "micro", "emacs", "less", "more", "most", "man", "top", "htop",
+    "btop", "mc", "tmux", "screen", "nmtui", "alsamixer", "w3m", "lynx", "links", "watch",
+    "cfdisk", "ncdu", "ranger", "nnn",
+}
+INTERACTIVE_CMDS = {  # read from the keyboard: run in the terminal and pause after
+    "sh", "ash", "bash", "zsh", "fish", "python", "python3", "node", "ssh", "telnet", "ftp", "sftp",
+    "su", "sudo", "doas", "passwd", "apt", "apt-get", "pacman", "dnf", "fdisk", "parted", "crontab",
+    "visudo", "read", "bc", "irssi", "weechat", "mutt",
+}
+ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07|\x1b[()][A-Z0-9]|\r")
 
 DEFAULT_CONFIG = {
     "theme": "green",
@@ -303,6 +323,10 @@ class App:
             curses.start_color()
         self.apply_theme()
         self.files = FileManager(self)
+        # command line state (kept while you move around the menus)
+        self.con_cwd = os.path.expanduser("~")
+        self.con_buf, self.con_cur, self.con_out, self.con_top, self.con_rows = "", 0, [], 0, 0
+        self.history, self.hist_i, self.hist_saved = self.load_history(), None, ""
 
     # ---- colours
     def apply_theme(self):
@@ -426,13 +450,196 @@ class App:
         room = max(0, W - len(clock) - 2)
         put(self.scr, H - 1, 0, ((" " + hints)[:room].ljust(room) + " " + clock + " ")[:W], self.sel)
 
-    def prompt_line(self, y, W):
-        """A fake shell prompt with a blinking block cursor, like an idle terminal."""
-        blink = self.B["block"] if int(time.time() * 2) % 2 == 0 else " "
-        text = f"{self.user}@{self.host}:~$ "
-        x = max(0, (W - len(text) - 30) // 2)
-        put(self.scr, y, x, text, self.norm)
-        put(self.scr, y, x + len(text), blink, self.bold)
+    # ---- the live command line under the main menu
+    def short_cwd(self):
+        home = os.path.expanduser("~")
+        p = self.con_cwd
+        if p == home or p.startswith(home + os.sep):
+            p = "~" + p[len(home):]
+        return p
+
+    def draw_console(self, y0, x, w, H, focused, keep_footer):
+        """Prompt line + output of the last command. Returns the number of output rows."""
+        ps = f"{self.user}@{self.host}:{self.short_cwd()}$ "
+        if len(ps) > w // 2:
+            ps = "..." + ps[-(w // 2 - 3):]
+        avail = max(1, w - len(ps) - 1)
+        text, cur = self.con_buf, self.con_cur
+        start = max(0, cur - avail + 1)
+        put(self.scr, y0, x, ps, self.bold if focused else self.norm)
+        put(self.scr, y0, x + len(ps), text[start:start + avail], self.bold)
+        cx = x + len(ps) + cur - start
+        if focused:
+            put(self.scr, y0, cx, text[cur] if cur < len(text) else " ", self.sel)
+        elif not text and int(time.time() * 2) % 2 == 0:
+            put(self.scr, y0, cx, self.B["block"], self.bold)
+        last = H - 3 if keep_footer else H - 2
+        rows = max(0, last - y0)
+        out = self.con_out
+        self.con_top = max(0, min(self.con_top, len(out) - rows))
+        for i in range(rows):
+            j = self.con_top + i
+            if j < len(out):
+                line = out[j]
+                attr = self.bold if j == 0 else (self.dim if line.startswith("[") else self.norm)
+                put(self.scr, y0 + 1 + i, x, line[:w], attr)
+        if len(out) > rows > 0:
+            if self.con_top > 0:
+                put(self.scr, y0 + 1, x + w - 1, self.B["up"], self.bold)
+            if self.con_top + rows < len(out):
+                put(self.scr, y0 + rows, x + w - 1, self.B["down"], self.bold)
+        return rows
+
+    def load_history(self):
+        try:
+            with open(HISTORY_FILE, errors="replace") as f:
+                lines = [l.rstrip("\n") for l in f if l.strip()]
+        except OSError:
+            return []
+        if len(lines) > 2 * HISTORY_MAX:  # trim the file now and then
+            lines = lines[-HISTORY_MAX:]
+            try:
+                with open(HISTORY_FILE, "w") as f:
+                    f.write("\n".join(lines) + "\n")
+            except OSError:
+                pass
+        return lines[-HISTORY_MAX:]
+
+    def add_history(self, cmd):
+        if self.history and self.history[-1] == cmd:
+            return
+        self.history.append(cmd)
+        del self.history[:-HISTORY_MAX]
+        try:
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            with open(HISTORY_FILE, "a") as f:
+                f.write(cmd.replace("\n", " ") + "\n")
+        except OSError:
+            pass
+
+    def console_key(self, k):
+        """Handle a key while the prompt has focus. Returns "menu" to give focus back."""
+        buf, cur = self.con_buf, self.con_cur
+        if isinstance(k, str):
+            self.con_buf = buf[:cur] + k + buf[cur:]
+            self.con_cur = cur + len(k)
+            self.hist_i = None
+            return None
+        if k in K_ENTER:
+            return self.console_run()
+        if k in (27, 9):  # ESC / TAB
+            return "menu"
+        if k == curses.KEY_UP:
+            if not self.history or self.hist_i == 0:
+                return "menu"
+            if self.hist_i is None:
+                self.hist_saved, self.hist_i = buf, len(self.history)
+            self.hist_i -= 1
+            self.con_buf = self.history[self.hist_i]
+            self.con_cur = len(self.con_buf)
+        elif k == curses.KEY_DOWN:
+            if self.hist_i is not None:
+                self.hist_i += 1
+                if self.hist_i >= len(self.history):
+                    self.con_buf, self.hist_i = self.hist_saved, None
+                else:
+                    self.con_buf = self.history[self.hist_i]
+                self.con_cur = len(self.con_buf)
+        elif k == curses.KEY_LEFT:
+            self.con_cur = max(0, cur - 1)
+        elif k == curses.KEY_RIGHT:
+            self.con_cur = min(len(buf), cur + 1)
+        elif k in (curses.KEY_HOME, 1):  # Ctrl-A
+            self.con_cur = 0
+        elif k in (curses.KEY_END, 5):  # Ctrl-E
+            self.con_cur = len(buf)
+        elif k in (curses.KEY_BACKSPACE, 127, 8):
+            if cur > 0:
+                self.con_buf, self.con_cur = buf[:cur - 1] + buf[cur:], cur - 1
+        elif k == curses.KEY_DC:
+            self.con_buf = buf[:cur] + buf[cur + 1:]
+        elif k == 21:  # Ctrl-U
+            self.con_buf, self.con_cur = "", 0
+        elif k == 12:  # Ctrl-L
+            self.con_out, self.con_top = [], 0
+        elif k == curses.KEY_PPAGE:
+            self.con_top = max(0, self.con_top - max(1, self.con_rows - 1))
+        elif k == curses.KEY_NPAGE:
+            self.con_top += max(1, self.con_rows - 1)
+        return None
+
+    def console_run(self):
+        cmd = self.con_buf.strip()
+        self.con_buf, self.con_cur, self.hist_i = "", 0, None
+        if not cmd:
+            self.open_terminal(self.con_cwd)
+            return None
+        self.add_history(cmd)
+        if cmd in ("exit", "logout"):
+            return "menu"
+        if cmd in ("clear", "cls"):
+            self.con_out, self.con_top = [], 0
+            return None
+        if cmd == "cd" or cmd.startswith("cd "):
+            target = os.path.expanduser(cmd[2:].strip() or "~")
+            target = os.path.normpath(os.path.join(self.con_cwd, target))
+            if os.path.isdir(target) and os.access(target, os.X_OK):
+                self.con_cwd = target
+                self.con_out = []
+            else:
+                self.con_out = [f"$ {cmd}", f"cd: no such folder: {target}"]
+            self.con_top = 0
+            return None
+        if cmd.startswith("!"):  # force the full terminal
+            cmd = cmd[1:].strip()
+            if cmd:
+                self.run(cmd, cwd=self.con_cwd, pause=True)
+                self.con_out, self.con_top = [f"$ {cmd}", "[ran in the full terminal]"], 0
+            return None
+        try:
+            prog = os.path.basename(shlex.split(cmd)[0])
+        except (ValueError, IndexError):
+            prog = cmd.split()[0]
+        if prog in FULLSCREEN_CMDS or prog in INTERACTIVE_CMDS:
+            self.run(cmd, cwd=self.con_cwd, pause=prog in INTERACTIVE_CMDS)
+            self.con_out, self.con_top = [f"$ {cmd}", "[ran in the full terminal]"], 0
+            return None
+        self.con_out, self.con_top = [f"$ {cmd}", "[running...]"], 0
+        self.bg()
+        curses.doupdate()
+        self.con_out = [f"$ {cmd}"] + self.capture(cmd)
+        self.con_top = len(self.con_out)  # show the end, like a terminal (PGUP scrolls back)
+        return None
+
+    def capture(self, cmd):
+        """Run a quick command without leaving the menu and return its output lines."""
+        env = dict(os.environ, TERM="dumb", PAGER="cat", NO_COLOR="1", RETROMENU="1",
+                   COLUMNS=str(max(20, self.scr.getmaxyx()[1] - 4)))
+        try:
+            p = subprocess.Popen(cmd, shell=True, cwd=self.con_cwd, env=env, stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                 start_new_session=True)  # own group, so a timeout kills children too
+        except OSError as e:
+            return [f"[could not run: {e.strerror}]"]
+        note = None
+        try:
+            out, _ = p.communicate(timeout=CONSOLE_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except OSError:
+                pass
+            out, _ = p.communicate()
+            note = f"[stopped after {CONSOLE_TIMEOUT}s -- start it with ! to run in the full terminal]"
+        text = ANSI_RE.sub("", out.decode("utf-8", "replace")).expandtabs()
+        lines = text.splitlines()[-CONSOLE_MAX_LINES:]
+        if note:
+            lines.append(note)
+        elif p.returncode == 127:
+            lines.append("[command not found]")
+        elif p.returncode:
+            lines.append(f"[exit code {p.returncode}]")
+        return lines or ["[no output]"]
 
     @staticmethod
     def resolve(sub):
@@ -444,10 +651,22 @@ class App:
             label += " " + self.B["sub"]
         return label
 
+    @staticmethod
+    def read_key(win):
+        """get_wch -> int key codes for keys/controls, str for printable text, -1 on timeout."""
+        try:
+            k = win.get_wch()
+        except curses.error:
+            return -1
+        if isinstance(k, str):
+            return k if k.isprintable() else ord(k)
+        return k
+
     # ---- generic full-screen menu (main menu, settings)
     def menu_screen(self, title, build, headers=("OPTION", "DESCRIPTION"), root=False):
         sel, top = 0, 0
-        geo = {}
+        geo = {"console": False}
+        focus = False  # True while typing in the command line (main menu only)
         while True:
             items = build()
             n = len(items)
@@ -467,19 +686,26 @@ class App:
                 c2 = max([len(i.get("desc", "")) for i in items] + [len(headers[1])]) + 3
                 tw = min(W, max(c1 + c2 + 3, len(title) + 6, 44))
                 c1 = min(c1, max(10, tw // 2))
-                spare = H - y - 3  # leave room for the prompt line and status bar
+                spare = H - y - (4 if root else 3)  # room for the command line and status bar
                 th = max(over + 1, min(spare, n + over))
                 tx = max(0, (W - tw) // 2)
                 body = th - over
                 _, top = clamp_scroll(sel, top, body, n)
-                self.draw_table(self.scr, y, tx, th, tw, n, row_at, sel, top,
+                self.draw_table(self.scr, y, tx, th, tw, n, row_at, -1 if focus else sel, top,
                                 title=title, headers=headers, widths=(c1,))
-                if y + th + 1 < H - 2:
-                    self.prompt_line(y + th + 1, W)
-                if H >= 20:
+                keep_footer = H >= 20 and not (root and self.con_out)
+                geo["console"] = root and y + th + 1 < H - 2
+                if geo["console"]:
+                    self.con_rows = self.draw_console(y + th + 1, tx, tw, H, focus, keep_footer)
+                if keep_footer:
                     put(self.scr, H - 2, max(0, (W - len(COPYRIGHT)) // 2), COPYRIGHT, self.dim)
-                back = "" if root else "  LEFT back"
-                self.status(H, W, f"UP/DN move  RIGHT/ENTER select{back}")
+                if focus:
+                    hints = "ENTER run  !cmd full terminal  UP/DN history  ESC menu"
+                elif root:
+                    hints = "UP/DN move  RIGHT/ENTER select  type to run a command"
+                else:
+                    hints = "UP/DN move  RIGHT/ENTER select  LEFT back"
+                self.status(H, W, hints)
                 self.scr.noutrefresh()
                 geo.update(y=y + over - 1, x=tx + c1 + 1, w=tw, body=body)
 
@@ -487,11 +713,23 @@ class App:
             draw()
             curses.doupdate()
             self.scr.timeout(500)  # wake up for the clock and the blinking cursor
-            k = self.scr.getch()
+            k = self.read_key(self.scr)
             self.scr.timeout(-1)
 
             if k in (-1, curses.KEY_RESIZE):
                 continue
+            if focus:
+                if self.console_key(k) == "menu":
+                    focus = False
+                continue
+            if root and geo["console"] and (isinstance(k, str) or k == 9
+                                            or (k == curses.KEY_DOWN and sel == n - 1)):
+                focus = True  # typing anything jumps into the command line
+                if isinstance(k, str):
+                    self.console_key(k)
+                continue
+            if isinstance(k, str):
+                k = ord(k)  # vim keys (h j k l q) in the other screens
             if k in K_UP:
                 sel = (sel - 1) % n
             elif k in K_DOWN:
