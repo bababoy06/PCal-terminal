@@ -21,6 +21,18 @@ Keys: `UP/DOWN` move, `RIGHT/ENTER` open, `LEFT/ESC/q` back, `PGUP/PGDN` scroll.
 | Settings    | Theme (green/amber/white/cyan), monitor, shell, editor, pager, hidden files, splash, reboot command. Saved to `~/.config/retromenu/config.json`. |
 | Reboot      | Asks for confirmation, then uses `doas`/`sudo` if needed (password prompt). |
 
+## Command line under the menu
+
+The `user@host:~$` line under the main menu is a real prompt.
+
+- **Start typing** (or press ↓ past Exit, or TAB) to jump into it. **ESC** goes back to the menu.
+- **ENTER** runs the command, and its output appears right under the prompt. **PGUP/PGDN** scrolls the output.
+- **ENTER on an empty line** opens the full terminal.
+- **↑/↓** browses your history, which is saved in `~/.config/retromenu/history`. ↑ past the oldest entry returns to the menu.
+- `cd` changes the prompt's folder, and `clear` (or Ctrl-L) empties the output.
+- Programs that need the whole screen or the keyboard (`vim`, `nano`, `top`, `less`, `ssh`, `sudo`, `python`...) automatically run in the full terminal. Start any command with `!` to force that, e.g. `!ping 1.1.1.1`.
+- Quick commands are stopped after 5 seconds, including anything they started, so a runaway command can't freeze the menu.
+
 ## Look
 
 - Double-line boxed tables (`╔═╦═╗`) for every menu, popup and dialog, with an ASCII fallback (`+=|`) for non-UTF-8 consoles.
