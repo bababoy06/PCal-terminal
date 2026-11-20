@@ -5,8 +5,9 @@
 #   wget -qO- https://raw.githubusercontent.com/bababoy06/Pontes-Calos/main/distro/install.sh | sh
 #
 # What it does (all reversible with --uninstall):
-#   - installs python3 + the few packages the menu uses
-#   - installs RetroMenu to /usr/local/bin/retromenu and RetroLogin to /usr/local/bin/retrologin
+#   - installs the latest release build of Pontes-Calos (no Python needed) to
+#     /usr/lib/pontes-calos, with retromenu / retrologin / pontes in /usr/local/bin
+#     (falls back to the Python source when there is no release to download)
 #   - shows the retro login screen on tty1; after login the menu starts
 #     (tty2..tty6 stay normal password logins: your safety net, Alt+F2)
 #   - lets USER reboot / power off from the menu without a password (doas)
@@ -14,9 +15,12 @@
 set -eu
 
 REPO_RAW="https://raw.githubusercontent.com/bababoy06/Pontes-Calos/main"
+RELEASE_URL="https://github.com/bababoy06/Pontes-Calos/releases/latest/download"
 ROOT="${ROOT:-}"  # only for testing in a fake root
 BIN="$ROOT/usr/local/bin/retromenu"
 LOGIN_BIN="$ROOT/usr/local/bin/retrologin"
+PONTES_BIN="$ROOT/usr/local/bin/pontes"
+LIBDIR="$ROOT/usr/lib/pontes-calos"
 SHARE="$ROOT/usr/share/retromenu"
 INITTAB="$ROOT/etc/inittab"
 DOAS_RULE="$ROOT/etc/doas.d/retromenu.conf"
@@ -36,6 +40,8 @@ Usage: install.sh [options] [USER]
   USER            account that gets the menu on tty1 (default: first user in /home)
   --plain-login   keep the normal text login on tty1 (the menu still starts after it)
   --autologin     no password at all on tty1 (only for a VM or a kiosk!)
+  --binary FILE   install this release archive (pontes-calos-linux-*-musl.tar.gz)
+  --from-source   install the Python source instead of the release build
   --fast-boot     1 second boot menu and quiet kernel messages (extlinux/BIOS installs)
   --uninstall     undo autologin, autostart, doas rule and fast boot (keeps the program)
   -h, --help      this text
@@ -45,18 +51,28 @@ EOF
 LOGIN_MODE=screen  # screen | plain | auto
 FASTBOOT=0
 UNINSTALL=0
+FROM_SOURCE=0
+BINARY_FILE=""
 TARGET=""
-for arg in "$@"; do
-    case "$arg" in
+while [ $# -gt 0 ]; do
+    case "$1" in
         --plain-login | --no-autologin) LOGIN_MODE=plain ;;
         --autologin) LOGIN_MODE=auto ;;
         --fast-boot) FASTBOOT=1 ;;
         --uninstall) UNINSTALL=1 ;;
+        --from-source) FROM_SOURCE=1 ;;
+        --binary)
+            [ $# -ge 2 ] || die "--binary needs a file"
+            BINARY_FILE=$2
+            shift
+            ;;
         -h | --help) usage; exit 0 ;;
-        -*) usage; die "unknown option: $arg" ;;
-        *) TARGET="$arg" ;;
+        -*) usage; die "unknown option: $1" ;;
+        *) TARGET="$1" ;;
     esac
+    shift
 done
+[ -z "$BINARY_FILE" ] || [ -f "$BINARY_FILE" ] || die "no such file: $BINARY_FILE"
 
 [ "$(id -u)" -eq 0 ] || die "run this as root, e.g.: doas sh install.sh"
 [ -f "$ROOT/etc/alpine-release" ] || die "this installer is for Alpine Linux (see retromenu/README.md for other systems)"
@@ -98,38 +114,95 @@ if [ "$UNINSTALL" = 1 ]; then
     exit 0
 fi
 
-# ---- packages
-say "installing packages (python3, terminfo, doas, less, file, terminus font)"
-apk add --no-cache python3 ncurses-terminfo-base doas less file terminus-font >/dev/null \
-    || die "apk failed: check your network and /etc/apk/repositories"
-
-# ---- the program: from this checkout if we're in one, else from GitHub
+# ---- get the program: release build (default) or Python source
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-SRC=$(cd "$(dirname "$0")/.." 2>/dev/null && pwd || true)
-if [ -n "$SRC" ] && [ -f "$SRC/retromenu/retromenu.py" ]; then
-    say "using RetroMenu from $SRC"
-    cp "$SRC/retromenu/retromenu.py" "$TMP/retromenu.py"
-    cp "$SRC/retromenu/retrologin.py" "$TMP/retrologin.py"
-    cp "$SRC"/retromenu/plugins/*.json "$TMP/" 2>/dev/null || true
-else
-    say "downloading RetroMenu"
-    wget -q -O "$TMP/retromenu.py" "$REPO_RAW/retromenu/retromenu.py" \
-        || die "download failed. Is the repository public? You can also git clone it and run distro/install.sh"
-    wget -q -O "$TMP/retrologin.py" "$REPO_RAW/retromenu/retrologin.py" || die "download of retrologin failed"
-    wget -q -O "$TMP/network.json" "$REPO_RAW/retromenu/plugins/network.json" 2>/dev/null || true
+ARCH=$(uname -m)
+ARCHIVE="pontes-calos-linux-$ARCH-musl.tar.gz"
+MODE=source
+if [ -n "$BINARY_FILE" ]; then
+    cp "$BINARY_FILE" "$TMP/pontes.tar.gz"
+    MODE=binary
+elif [ "$FROM_SOURCE" = 0 ]; then
+    say "downloading the latest release ($ARCHIVE)"
+    if wget -q -O "$TMP/pontes.tar.gz" "$RELEASE_URL/$ARCHIVE" 2>/dev/null; then
+        if wget -q -O "$TMP/pontes.sha256" "$RELEASE_URL/$ARCHIVE.sha256" 2>/dev/null; then
+            want=$(cut -d' ' -f1 "$TMP/pontes.sha256")
+            have=$(sha256sum "$TMP/pontes.tar.gz" | cut -d' ' -f1)
+            [ "$want" = "$have" ] || die "checksum mismatch on $ARCHIVE, not installing it"
+            say "checksum OK"
+        fi
+        MODE=binary
+    else
+        warn "no release to download (no release yet, private repository or no network): installing the Python source instead"
+    fi
 fi
-for f in retromenu retrologin; do
-    python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$TMP/$f.py" \
-        || die "$f.py is damaged, not installing it"
-done
+
+# ---- packages (the release build has Python inside, so it doesn't need python3)
+PACKAGES="ncurses-terminfo-base doas less file terminus-font"
+[ "$MODE" = binary ] || PACKAGES="python3 $PACKAGES"
+say "installing packages ($PACKAGES)"
+# shellcheck disable=SC2086
+apk add --no-cache $PACKAGES >/dev/null || die "apk failed: check your network and /etc/apk/repositories"
+
+if [ "$MODE" = binary ]; then
+    mkdir -p "$TMP/x"
+    tar -xzf "$TMP/pontes.tar.gz" -C "$TMP/x" || die "the release archive is damaged"
+    [ -x "$TMP/x/pontes/pontes" ] || die "the release archive does not contain the pontes program"
+    if [ -z "$ROOT" ]; then
+        VERSION=$("$TMP/x/pontes/pontes" --version 2>/dev/null) \
+            || die "the release program does not run here (wrong CPU type or C library?). Try --from-source"
+    else
+        VERSION="pontes-calos (test root)"
+    fi
+    rm -rf "$LIBDIR.new"
+    mkdir -p "$LIBDIR.new"
+    mv "$TMP/x/pontes" "$LIBDIR.new/pontes"
+    rm -rf "$LIBDIR"
+    mv "$LIBDIR.new" "$LIBDIR"
+    TARGET_BIN=/usr/lib/pontes-calos/pontes/pontes
+    MENU_LINK=$TARGET_BIN LOGIN_LINK=$TARGET_BIN PONTES_LINK=$TARGET_BIN
+    PLUGIN_SRC="$LIBDIR/pontes/plugins"
+else
+    SRC=$(cd "$(dirname "$0")/.." 2>/dev/null && pwd || true)
+    mkdir -p "$TMP/src"
+    if [ -n "$SRC" ] && [ -f "$SRC/retromenu/pontes.py" ]; then
+        say "using the Python source from $SRC"
+        cp "$SRC"/retromenu/*.py "$TMP/src/"
+        mkdir -p "$TMP/src/plugins"
+        cp "$SRC"/retromenu/plugins/*.json "$TMP/src/plugins/" 2>/dev/null || true
+    else
+        say "downloading the Python source"
+        for f in pontes retromenu retrologin; do
+            wget -q -O "$TMP/src/$f.py" "$REPO_RAW/retromenu/$f.py" \
+                || die "download failed. Is the repository public? You can also git clone it and run distro/install.sh"
+        done
+        mkdir -p "$TMP/src/plugins"
+        wget -q -O "$TMP/src/plugins/network.json" "$REPO_RAW/retromenu/plugins/network.json" 2>/dev/null || true
+    fi
+    for f in pontes retromenu retrologin; do
+        python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$TMP/src/$f.py" \
+            || die "$f.py is damaged, not installing it"
+    done
+    chmod 755 "$TMP"/src/*.py
+    rm -rf "$LIBDIR"
+    mkdir -p "$LIBDIR"
+    mv "$TMP/src" "$LIBDIR/src"
+    VERSION="pontes-calos $(sed -n 's/^VERSION = "\(.*\)"/\1/p' "$LIBDIR/src/retromenu.py") (Python source)"
+    MENU_LINK=/usr/lib/pontes-calos/src/retromenu.py
+    LOGIN_LINK=/usr/lib/pontes-calos/src/retrologin.py
+    PONTES_LINK=/usr/lib/pontes-calos/src/pontes.py
+    PLUGIN_SRC="$LIBDIR/src/plugins"
+fi
 mkdir -p "$(dirname "$BIN")" "$SHARE/plugins"
-install -m 755 "$TMP/retromenu.py" "$BIN"
-install -m 755 "$TMP/retrologin.py" "$LOGIN_BIN"
-for f in "$TMP"/*.json; do
+rm -f "$BIN" "$LOGIN_BIN" "$PONTES_BIN"
+ln -s "$MENU_LINK" "$BIN"
+ln -s "$LOGIN_LINK" "$LOGIN_BIN"
+ln -s "$PONTES_LINK" "$PONTES_BIN"
+for f in "$PLUGIN_SRC"/*.json; do
     [ -f "$f" ] && cp "$f" "$SHARE/plugins/"
 done
-say "installed /usr/local/bin/retromenu and /usr/local/bin/retrologin"
+say "installed $VERSION -> /usr/local/bin/retromenu, retrologin, pontes"
 
 # ---- reboot / power off from the menu without a password
 mkdir -p "$(dirname "$DOAS_RULE")"

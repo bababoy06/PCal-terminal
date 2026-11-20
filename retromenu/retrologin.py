@@ -343,12 +343,17 @@ def main():
     os.execv(login_cmd, [os.path.basename(login_cmd), "-f", user])
 
 
-if __name__ == "__main__":
+def entry():
+    """Start the login screen (used by `python3 retrologin.py` and by the pontes binary)."""
     try:
-        sys.exit(main())
+        return main()
     except KeyboardInterrupt:
-        sys.exit(1)
+        return 1
     except Exception as e:  # never leave anything usable behind; init restarts us
         print(f"retrologin: {e}", file=sys.stderr)
         time.sleep(3)
-        sys.exit(1)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(entry())

@@ -26,6 +26,8 @@ or, if the repository is public, without git:
 wget -qO- https://raw.githubusercontent.com/bababoy06/Pontes-Calos/main/distro/install.sh | sh -s -- --fast-boot
 ```
 
+The installer downloads the latest **release build**, which has Python built in, so `python3` isn't installed at all. If there is no release yet (or the repository is private), it installs the Python source instead. You can choose explicitly with `--binary pontes-calos-linux-x86_64-musl.tar.gz` (a file you copied over) or `--from-source`.
+
 Reboot. tty1 now shows the green login screen. Log in and the menu opens; **Log out** brings you back to the login screen.
 
 Your user needs a password (`setup-alpine` asks for one; otherwise run `passwd jules`).
@@ -34,8 +36,8 @@ Your user needs a password (`setup-alpine` asks for one; otherwise run `passwd j
 
 | What | Where | Why |
 |---|---|---|
-| Packages | `python3 ncurses-terminfo-base doas less file terminus-font` | everything the menu needs |
-| Programs | `/usr/local/bin/retromenu`, `/usr/local/bin/retrologin` | the menu and the login screen |
+| Packages | `ncurses-terminfo-base doas less file terminus-font` (+ `python3` for a source install) | everything the menu needs |
+| Programs | `/usr/lib/pontes-calos/`, linked as `/usr/local/bin/retromenu`, `retrologin`, `pontes` | the menu and the login screen |
 | Login screen | `/etc/inittab`, tty1 line (backup: `inittab.retromenu.bak`) | RetroLogin on tty1 instead of the plain prompt |
 | Quiet login | `~/.hushlogin` | no "Welcome to Alpine" text between login and menu |
 | Autostart | block in `~/.profile`, between `retromenu autostart` markers | starts the menu on tty1 only |
@@ -54,7 +56,7 @@ Your user needs a password (`setup-alpine` asks for one; otherwise run `passwd j
 ## Options
 
 ```
-install.sh [--plain-login | --autologin] [--fast-boot] [--uninstall] [USER]
+install.sh [--plain-login | --autologin] [--binary FILE | --from-source] [--fast-boot] [--uninstall] [USER]
 ```
 
 `USER` defaults to the first account in `/home`.
