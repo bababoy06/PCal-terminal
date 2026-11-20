@@ -25,7 +25,7 @@ Keys: `UP/DOWN` move, `RIGHT/ENTER` open, `LEFT/ESC/q` back, `PGUP/PGDN` scroll.
 
 The `user@host:~$` line under the main menu is a real prompt.
 
-- **Start typing** (or press ↓ past Exit, or TAB) to jump into it. **ESC** goes back to the menu.
+- Press **i** (like insert mode in vim) or **TAB** to jump into it. **ESC** goes back to the menu. In the menu itself, `h j k l` still navigate.
 - **ENTER** runs the command, and its output appears right under the prompt. **PGUP/PGDN** scrolls the output.
 - **ENTER on an empty line** opens the full terminal.
 - **↑/↓** browses your history, which is saved in `~/.config/retromenu/history`. ↑ past the oldest entry returns to the menu.

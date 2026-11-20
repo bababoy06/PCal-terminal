@@ -700,9 +700,9 @@ class App:
                 if keep_footer:
                     put(self.scr, H - 2, max(0, (W - len(COPYRIGHT)) // 2), COPYRIGHT, self.dim)
                 if focus:
-                    hints = "ENTER run  !cmd full terminal  UP/DN history  ESC menu"
+                    hints = "-- INSERT --  ENTER run  !cmd full terminal  UP/DN history  ESC menu"
                 elif root:
-                    hints = "UP/DN move  RIGHT/ENTER select  type to run a command"
+                    hints = "UP/DN move  RIGHT/ENTER select  i command line"
                 else:
                     hints = "UP/DN move  RIGHT/ENTER select  LEFT back"
                 self.status(H, W, hints)
@@ -722,11 +722,8 @@ class App:
                 if self.console_key(k) == "menu":
                     focus = False
                 continue
-            if root and geo["console"] and (isinstance(k, str) or k == 9
-                                            or (k == curses.KEY_DOWN and sel == n - 1)):
-                focus = True  # typing anything jumps into the command line
-                if isinstance(k, str):
-                    self.console_key(k)
+            if root and geo["console"] and k in ("i", 9):
+                focus = True  # vim style: i (or TAB) = insert mode in the command line
                 continue
             if isinstance(k, str):
                 k = ord(k)  # vim keys (h j k l q) in the other screens
