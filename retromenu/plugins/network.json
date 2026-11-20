@@ -1,5 +1,6 @@
 {
   "name": "Network",
+  "description": "Wifi and IP tools",
   "command": "nmtui",
   "options": [
     { "label": "Show IP addresses", "command": "ip -c a", "pause": true },

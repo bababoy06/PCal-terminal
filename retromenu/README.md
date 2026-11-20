@@ -21,10 +21,19 @@ Keys: `UP/DOWN` move, `RIGHT/ENTER` open, `LEFT/ESC/q` back, `PGUP/PGDN` scroll.
 | Settings    | Theme (green/amber/white/cyan), monitor, shell, editor, pager, hidden files, splash, reboot command. Saved to `~/.config/retromenu/config.json`. |
 | Reboot      | Asks for confirmation, then uses `doas`/`sudo` if needed (password prompt). |
 
+## Look
+
+- Double-line boxed tables (`╔═╦═╗`) for every menu, popup and dialog, with an ASCII fallback (`+=|`) for non-UTF-8 consoles.
+- Big ASCII banner, a live readout of memory, load and uptime, a blinking prompt cursor, and a boot screen with a block progress bar.
+- `ls -l` style file view with permissions, size, modified date and name. It switches to size + name on narrow screens.
+- Themes: green, amber, white, cyan. Uses 256 colours when the terminal supports them.
+- On the real Linux console (`TERM=linux`), the menu repaints the console's own palette into phosphor green or amber, and restores it on exit. This can be turned off in Settings > Console palette.
+- For CRT glow, scanlines and curvature on a desktop, run it inside [cool-retro-term](https://github.com/Swordfish90/cool-retro-term).
+
 ## Plugins
 
 ```json
-{ "name": "Network", "command": "nmtui",
+{ "name": "Network", "description": "Wifi and IP tools", "command": "nmtui",
   "options": [ { "label": "Show IP", "command": "ip a", "pause": true },
                { "label": "More", "options": [ ... ] } ] }
 ```

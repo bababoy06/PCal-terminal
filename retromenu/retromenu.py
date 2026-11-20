@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-RetroMenu - a green-phosphor, arrow-key driven home screen for a lightweight Linux.
+RetroMenu - the green-phosphor, arrow-key home screen of Pontes-Calos.
 
 Keys (everywhere):
   UP / DOWN        move            (also k / j)
@@ -12,7 +12,6 @@ Keys (everywhere):
 Only uses the Python standard library (curses), so on Alpine: apk add python3
 """
 import curses
-import curses.textpad
 import grp
 import json
 import locale
@@ -24,10 +23,15 @@ import shutil
 import socket
 import stat
 import subprocess
+import sys
 import textwrap
 import time
 
-VERSION = "0.1"
+VERSION = "0.2"
+SYSTEM_NAME = "PONTES-CALOS"
+TAGLINE = "A PONTES-CALOS SYSTEM"
+COPYRIGHT = "(C) PONTES-CALOS DATA SYSTEMS"
+
 CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "retromenu")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 PLUGIN_DIR = os.path.join(CONFIG_DIR, "plugins")
@@ -41,22 +45,48 @@ DEFAULT_CONFIG = {
     "pager": "less",
     "show_hidden": False,
     "splash": True,
+    "console_palette": True,
     "reboot_cmd": "reboot",
 }
 
+# ------------------------------------------------------------------ the look
+# Per theme: 8-colour base, 256-colour (normal, bright, dim), and the RGB values
+# used to repaint the real Linux console (background, normal, bright, dim).
 THEMES = {
-    "green": curses.COLOR_GREEN,
-    "amber": curses.COLOR_YELLOW,
-    "white": curses.COLOR_WHITE,
-    "cyan": curses.COLOR_CYAN,
+    "green": (curses.COLOR_GREEN, (77, 120, 28), ("020a04", "33ff66", "b4ffc8", "1d6b34")),
+    "amber": (curses.COLOR_YELLOW, (214, 222, 130), ("0a0600", "ffb000", "ffd98a", "7a5000")),
+    "white": (curses.COLOR_WHITE, (250, 231, 243), ("080808", "d0d0d0", "ffffff", "6a6a6a")),
+    "cyan": (curses.COLOR_CYAN, (80, 159, 30), ("000a0c", "33e0ff", "c0f6ff", "1a6070")),
 }
 
-# Banner built from figlet-style letters, so it is easy to change.
-_R = [" ____  ", "|  _ \\ ", "| |_) |", "|  _ < ", "|_| \\_\\"]
-_E = [" _____ ", "| ____|", "|  _|  ", "| |___ ", "|_____|"]
-_T = [" _____ ", "|_   _|", "  | |  ", "  | |  ", "  |_|  "]
-_O = ["  ___  ", " / _ \\ ", "| | | |", "| |_| |", " \\___/ "]
-BANNER = [" ".join(parts) for parts in zip(_R, _E, _T, _R, _O)]
+# A small figlet-style font, so the banner works in plain ASCII.
+FONT = {
+    "P": [" ___ ", "| _ \\", "|  _/", "|_|  "],
+    "O": ["  ___  ", " / _ \\ ", "| (_) |", " \\___/ "],
+    "N": [" _  _ ", "| \\| |", "| .` |", "|_|\\_|"],
+    "T": [" _____ ", "|_   _|", "  | |  ", "  |_|  "],
+    "E": [" ___ ", "| __|", "| _| ", "|___|"],
+    "S": [" ___ ", "/ __|", "\\__ \\", "|___/"],
+    "C": ["  ___ ", " / __|", "| (__ ", " \\___|"],
+    "A": ["   _   ", "  /_\\  ", " / _ \\ ", "/_/ \\_\\"],
+    "L": [" _    ", "| |   ", "| |__ ", "|____|"],
+    "-": ["    ", " __ ", "|__|", "    "],
+    " ": ["  ", "  ", "  ", "  "],
+}
+
+
+def render_banner(text):
+    return ["".join(FONT[c][row] for c in text if c in FONT) for row in range(4)]
+
+
+BANNER = render_banner(SYSTEM_NAME)
+
+UNICODE_CHARS = dict(tl="╔", tr="╗", bl="╚", br="╝", h="═", v="║", lt="╠", rt="╣",
+                     tt="╦", bt="╩", x="╬", ptr="►", sub="»", up="▲", down="▼",
+                     block="█", shade="░")
+ASCII_CHARS = dict(tl="+", tr="+", bl="+", br="+", h="=", v="|", lt="+", rt="+",
+                   tt="+", bt="+", x="+", ptr=">", sub=">>", up="^", down="v",
+                   block="#", shade=".")
 
 K_UP = (curses.KEY_UP, ord("k"))
 K_DOWN = (curses.KEY_DOWN, ord("j"))
@@ -68,9 +98,9 @@ EXIT = object()  # returned by the "Exit" item to leave the program
 
 
 # --------------------------------------------------------------------- helpers
-def item(label, action=None, sub=None):
+def item(label, action=None, sub=None, desc=""):
     """A menu entry. `sub` is a list of items, or a function returning one."""
-    return {"label": label, "action": action, "sub": sub}
+    return {"label": label, "action": action, "sub": sub, "desc": desc}
 
 
 def put(win, y, x, text, attr=0):
@@ -87,9 +117,19 @@ def put(win, y, x, text, attr=0):
         pass  # writing the bottom-right cell raises but still draws
 
 
+def fit(text, width):
+    """Pad/clip text to exactly `width` columns with one space of margin."""
+    if width <= 0:
+        return ""
+    text = " " + text
+    if len(text) > width:
+        text = text[: max(0, width - 1)] + "~"
+    return text.ljust(width)
+
+
 def clamp_scroll(sel, top, height, n):
     if n == 0 or height <= 0:
-        return 0, 0
+        return max(0, min(sel, n - 1)) if n else 0, 0
     sel = max(0, min(sel, n - 1))
     if sel < top:
         top = sel
@@ -111,6 +151,38 @@ def cursor(visible):
         curses.curs_set(visible)
     except curses.error:
         pass
+
+
+def sysinfo():
+    """Tiny /proc readout for the home screen (three small reads, no subprocess)."""
+    parts = []
+    try:
+        mem = {}
+        with open("/proc/meminfo") as f:
+            for line in f:
+                k, v = line.split(":", 1)
+                mem[k] = int(v.split()[0]) * 1024
+                if len(mem) > 5:
+                    break
+        total = mem.get("MemTotal", 0)
+        used = total - mem.get("MemAvailable", mem.get("MemFree", 0))
+        parts.append(f"MEM {human_size(used)}/{human_size(total)}")
+    except (OSError, ValueError):
+        pass
+    try:
+        with open("/proc/loadavg") as f:
+            parts.append("LOAD " + f.read().split()[0])
+    except (OSError, IndexError):
+        pass
+    try:
+        with open("/proc/uptime") as f:
+            s = int(float(f.read().split()[0]))
+        d, s = divmod(s, 86400)
+        h, s = divmod(s, 3600)
+        parts.append("UP " + (f"{d}d" if d else "") + f"{h}h{s // 60:02d}m")
+    except (OSError, ValueError, IndexError):
+        pass
+    return "  ".join(parts)
 
 
 def load_config():
@@ -153,15 +225,36 @@ def load_plugins():
     return plugins
 
 
+def console_palette(theme):
+    """On the real Linux console, repaint the 16 colours to a phosphor palette."""
+    if os.environ.get("TERM") != "linux":
+        return
+    bg, normal, bright, dim = THEMES.get(theme, THEMES["green"])[2]
+    base = THEMES.get(theme, THEMES["green"])[0]
+    seq = f"\033]P0{bg}\033]P{base:X}{normal}\033]P{base + 8:X}{bright}\033]P8{dim}"
+    try:
+        os.write(sys.stdout.fileno(), seq.encode())
+    except OSError:
+        pass
+
+
+def console_palette_reset():
+    if os.environ.get("TERM") == "linux":
+        try:
+            os.write(sys.stdout.fileno(), b"\033]R")
+        except OSError:
+            pass
+
+
 # ------------------------------------------------------------------ file model
 class Entry:
-    __slots__ = ("name", "path", "is_dir", "is_link", "_de", "_size")
+    __slots__ = ("name", "path", "is_dir", "is_link", "_de", "_st")
 
     def __init__(self, de):
         self.name = de.name
         self.path = de.path
         self._de = de  # DirEntry caches its stat() result
-        self._size = None
+        self._st = False
         try:
             self.is_dir = de.is_dir()
         except OSError:
@@ -171,14 +264,17 @@ class Entry:
         except OSError:
             self.is_link = False
 
-    def size(self):
+    def st(self):
         # Only called for rows on screen: big folders open without stat-ing every file.
-        if self._size is None:
+        if self._st is False:
             try:
-                self._size = self._de.stat().st_size
+                self._st = self._de.stat()
             except OSError:
-                self._size = -1
-        return self._size
+                try:
+                    self._st = self._de.stat(follow_symlinks=False)
+                except OSError:
+                    self._st = None
+        return self._st
 
 
 # ------------------------------------------------------------------------- app
@@ -188,11 +284,17 @@ class App:
         self.cfg = load_config()
         self.plugins = []
         self.bg = lambda: None  # redraws whatever screen is currently below a dialog
-        self.host = socket.gethostname()
+        self.host = socket.gethostname().split(".")[0]
         try:
             self.user = pwd.getpwuid(os.getuid()).pw_name
         except KeyError:
             self.user = str(os.getuid())
+        try:  # what ncurses can really draw (Python itself may claim UTF-8 in the C locale)
+            enc = locale.nl_langinfo(locale.CODESET)
+        except (AttributeError, ValueError):
+            enc = locale.getpreferredencoding(False) or ""
+        enc = enc.upper().replace("-", "")
+        self.B = UNICODE_CHARS if enc == "UTF8" else ASCII_CHARS
         curses.raw()  # Ctrl-C / Ctrl-Z don't kill the home screen
         cursor(0)
         scr.keypad(True)
@@ -202,102 +304,189 @@ class App:
         self.apply_theme()
         self.files = FileManager(self)
 
-    # ---- look
+    # ---- colours
     def apply_theme(self):
-        if self.colors:
-            fg = THEMES.get(self.cfg.get("theme"), curses.COLOR_GREEN)
-            curses.init_pair(1, fg, curses.COLOR_BLACK)
-            self.norm = curses.color_pair(1)
-        else:
+        theme = self.cfg.get("theme")
+        base, rich, _ = THEMES.get(theme, THEMES["green"])
+        if self.cfg.get("console_palette"):
+            console_palette(theme)
+        if not self.colors:
             self.norm = curses.A_NORMAL
-        self.bold = self.norm | curses.A_BOLD
-        self.sel = self.norm | curses.A_REVERSE | curses.A_BOLD
-        self.dim = self.norm | curses.A_DIM
+            self.bold = curses.A_BOLD
+            self.dim = curses.A_DIM
+            self.sel = curses.A_REVERSE | curses.A_BOLD
+        else:
+            black = curses.COLOR_BLACK
+            if curses.COLORS >= 256:
+                n, b, d = rich
+                black = 16
+            else:
+                n = b = d = base
+            curses.init_pair(1, n, black)
+            curses.init_pair(2, b, black)
+            curses.init_pair(3, d, black)
+            curses.init_pair(4, black, b)
+            self.norm = curses.color_pair(1)
+            self.bold = curses.color_pair(2) | curses.A_BOLD
+            self.dim = curses.color_pair(3) | (curses.A_DIM if curses.COLORS < 256 else 0)
+            self.sel = curses.color_pair(4) | curses.A_BOLD
         self.scr.bkgd(" ", self.norm)
 
-    def box(self, win, y, x, h, w, title=None):
-        try:
-            curses.textpad.rectangle(win, y, x, y + h - 1, x + w - 1)
-        except curses.error:
-            pass
+    # ---- the boxed table: used for every menu, popup and dialog
+    @staticmethod
+    def table_overhead(title, headers):
+        return 2 + (2 if title else 0) + (2 if headers else 0)
+
+    def draw_table(self, win, y, x, h, w, n, row_at, sel=-1, top=0, title=None,
+                   headers=None, widths=(), pointer=True, footer=None):
+        """
+        Double-line box like an old terminal reference card.
+        widths: widths of every column except the last, which takes the rest.
+        row_at(i) -> (cells, attr). Returns the number of body rows.
+        """
+        B = self.B
+        iw = w - 2
+        seps, acc = [], 0
+        for cw in widths:
+            acc += cw
+            seps.append(acc)
+            acc += 1
+
+        def hline(left, right, cross):
+            chars = [B["h"]] * iw
+            for s in seps:
+                if 0 <= s < iw:
+                    chars[s] = cross
+            return left + "".join(chars) + right
+
+        def cells(values):
+            values = list(values) + [""] * (len(widths) + 1 - len(values))
+            parts = [fit(values[i], cw) for i, cw in enumerate(widths)]
+            parts.append(fit(values[len(widths)], iw - sum(widths) - len(widths)))
+            return B["v"].join(parts)
+
+        row = y
+        put(win, row, x, hline(B["tl"], B["tr"], B["tt"] if headers and not title else B["h"]), self.norm)
+        row += 1
         if title:
-            put(win, y, x + 2, f"[ {title} ]"[: max(0, w - 4)], self.bold)
-
-    def draw_rows(self, win, y, x, h, w, n, row_at, sel, top):
-        """Draw list rows `top..top+h`. row_at(i) -> (left_text, right_text)."""
-        for i in range(h):
+            put(win, row, x, B["v"], self.norm)
+            put(win, row, x + 1, title[:iw].center(iw), self.bold)
+            put(win, row, x + w - 1, B["v"], self.norm)
+            put(win, row + 1, x, hline(B["lt"], B["rt"], B["tt"] if headers else B["h"]), self.norm)
+            row += 2
+        if headers:
+            put(win, row, x, B["v"] + cells(headers) + B["v"], self.bold)
+            put(win, row + 1, x, hline(B["lt"], B["rt"], B["x"]), self.norm)
+            row += 2
+        body = max(0, y + h - 1 - row)
+        for i in range(body):
             idx = top + i
-            if idx >= n:
-                break
-            text, right = row_at(idx)
-            avail = w - len(right) - 3
-            if avail < 1:
-                right, avail = "", w - 2
-            if len(text) > avail:
-                text = text[: max(0, avail - 1)] + "~"
-            line = (" " + text.ljust(avail) + " " + right + " ")[:w].ljust(w)
-            put(win, y + i, x, line, self.sel if idx == sel else self.norm)
-        if n > h > 0:  # scroll markers
+            if idx < n:
+                values, attr = row_at(idx)
+                values = list(values)
+                if pointer and values:
+                    values[0] = (B["ptr"] + " " if idx == sel else "  ") + values[0]
+                line = cells(values)
+                a = self.sel if idx == sel else (attr or self.norm)
+            else:
+                line, a = cells([""]), self.norm
+            put(win, row + i, x, B["v"], self.norm)
+            put(win, row + i, x + 1, line, a)
+            put(win, row + i, x + w - 1, B["v"], self.norm)
+        put(win, y + h - 1, x, hline(B["bl"], B["br"], B["bt"]), self.norm)
+        if n > body > 0:  # scroll markers on the right border
             if top > 0:
-                put(win, y, x + w - 1, "^", self.bold)
-            if top + h < n:
-                put(win, y + h - 1, x + w - 1, "v", self.bold)
+                put(win, row, x + w - 1, B["up"], self.bold)
+            if top + body < n:
+                put(win, row + body - 1, x + w - 1, B["down"], self.bold)
+        if footer and w > len(footer) + 6:
+            put(win, y + h - 1, x + 2, f" {footer} ", self.dim)
+        return body
 
-    def draw_banner(self, H, W):
-        if H >= 22 and W >= len(BANNER[0]) + 2:
+    # ---- screen furniture
+    def draw_header(self, H, W, info=True):
+        """Big banner + tagline when there is room. Returns the next free row."""
+        if H >= 26 and W >= len(BANNER[0]) + 4:
+            x = (W - len(BANNER[0])) // 2
             for i, line in enumerate(BANNER):
-                put(self.scr, 1 + i, (W - len(line)) // 2, line, self.bold)
-            sub = f":: {self.user}@{self.host} :: RetroMenu v{VERSION} ::"
-            put(self.scr, 7, (W - len(sub)) // 2, sub, self.dim)
-            return 9
-        put(self.scr, 0, 1, f"RETRO :: {self.user}@{self.host}", self.bold)
-        return 1
+                put(self.scr, 1 + i, x, line, self.bold)
+            put(self.scr, 5, x + len(BANNER[0]) - len(TAGLINE), TAGLINE, self.norm)
+            y = 7
+        else:
+            put(self.scr, 0, 1, f"{SYSTEM_NAME} :: {TAGLINE}"[: W - 2], self.bold)
+            y = 1
+        if info:
+            line = f"USER {self.user}  HOST {self.host}  {sysinfo()}"
+            put(self.scr, y, max(0, (W - len(line)) // 2), line[:W], self.dim)
+            y += 2
+        return y
 
     def status(self, H, W, hints):
         clock = time.strftime("%H:%M:%S")
-        left = f" {hints}"
         room = max(0, W - len(clock) - 2)
-        put(self.scr, H - 1, 0, (left[:room].ljust(room) + " " + clock + " ")[:W], self.sel)
+        put(self.scr, H - 1, 0, ((" " + hints)[:room].ljust(room) + " " + clock + " ")[:W], self.sel)
 
-    @staticmethod
-    def label(it):
-        return (it["label"], ">" if it.get("sub") is not None else "")
+    def prompt_line(self, y, W):
+        """A fake shell prompt with a blinking block cursor, like an idle terminal."""
+        blink = self.B["block"] if int(time.time() * 2) % 2 == 0 else " "
+        text = f"{self.user}@{self.host}:~$ "
+        x = max(0, (W - len(text) - 30) // 2)
+        put(self.scr, y, x, text, self.norm)
+        put(self.scr, y, x + len(text), blink, self.bold)
 
     @staticmethod
     def resolve(sub):
         return sub() if callable(sub) else sub
 
+    def menu_row(self, it):
+        label = it["label"]
+        if it.get("sub") is not None:
+            label += " " + self.B["sub"]
+        return label
+
     # ---- generic full-screen menu (main menu, settings)
-    def menu_screen(self, title, build, root=False):
+    def menu_screen(self, title, build, headers=("OPTION", "DESCRIPTION"), root=False):
         sel, top = 0, 0
         geo = {}
         while True:
             items = build()
             n = len(items)
             sel = max(0, min(sel, n - 1))
-            rows = [self.label(i) for i in items]
+            labels = [self.menu_row(i) for i in items]
+
+            def row_at(i):
+                return (labels[i], items[i].get("desc", "")), None
 
             def draw():
                 nonlocal top
                 H, W = self.scr.getmaxyx()
                 self.scr.erase()
-                y = self.draw_banner(H, W)
-                bw = min(W, max(30, max(len(r[0]) for r in rows) + 8, len(title) + 8))
-                bh = max(3, min(H - y - 2, n + 2))
-                bx = max(0, (W - bw) // 2)
-                inner = bh - 2
-                _, top = clamp_scroll(sel, top, inner, n)
-                self.box(self.scr, y, bx, bh, bw, title)
-                self.draw_rows(self.scr, y + 1, bx + 1, inner, bw - 2, n, rows.__getitem__, sel, top)
+                y = self.draw_header(H, W)
+                over = self.table_overhead(title, headers)
+                c1 = max(len(l) for l in labels) + 6
+                c2 = max([len(i.get("desc", "")) for i in items] + [len(headers[1])]) + 3
+                tw = min(W, max(c1 + c2 + 3, len(title) + 6, 44))
+                c1 = min(c1, max(10, tw // 2))
+                spare = H - y - 3  # leave room for the prompt line and status bar
+                th = max(over + 1, min(spare, n + over))
+                tx = max(0, (W - tw) // 2)
+                body = th - over
+                _, top = clamp_scroll(sel, top, body, n)
+                self.draw_table(self.scr, y, tx, th, tw, n, row_at, sel, top,
+                                title=title, headers=headers, widths=(c1,))
+                if y + th + 1 < H - 2:
+                    self.prompt_line(y + th + 1, W)
+                if H >= 20:
+                    put(self.scr, H - 2, max(0, (W - len(COPYRIGHT)) // 2), COPYRIGHT, self.dim)
                 back = "" if root else "  LEFT back"
                 self.status(H, W, f"UP/DN move  RIGHT/ENTER select{back}")
                 self.scr.noutrefresh()
-                geo.update(y=y, x=bx, w=bw, inner=inner)
+                geo.update(y=y + over - 1, x=tx + c1 + 1, w=tw, body=body)
 
             self.bg = draw
             draw()
             curses.doupdate()
-            self.scr.timeout(1000)  # wake up every second for the clock
+            self.scr.timeout(500)  # wake up for the clock and the blinking cursor
             k = self.scr.getch()
             self.scr.timeout(-1)
 
@@ -308,16 +497,16 @@ class App:
             elif k in K_DOWN:
                 sel = (sel + 1) % n
             elif k == curses.KEY_PPAGE:
-                sel = max(0, sel - geo["inner"])
+                sel = max(0, sel - geo["body"])
             elif k == curses.KEY_NPAGE:
-                sel = min(n - 1, sel + geo["inner"])
+                sel = min(n - 1, sel + geo["body"])
             elif k == curses.KEY_HOME:
                 sel = 0
             elif k == curses.KEY_END:
                 sel = n - 1
             elif k in K_FWD or k in K_ENTER:
-                y = geo["y"] + 1 + sel - top
-                if self.open_item(items[sel], y, geo["x"] + geo["w"] - 2, draw) is EXIT:
+                y = geo["y"] + sel - top
+                if self.open_item(items[sel], y, geo["x"], draw) is EXIT:
                     return EXIT
             elif k in K_BACK and not root:
                 return None
@@ -325,7 +514,7 @@ class App:
     def open_item(self, it, y, x, redraw):
         act = it.get("action")
         if it.get("sub") is not None:
-            act = self.popup(self.resolve(it["sub"]), y, x, redraw)
+            act = self.popup(self.resolve(it["sub"]), y, x, redraw, title=it["label"].upper())
         if act:
             return act()
         return None
@@ -336,27 +525,33 @@ class App:
         if not items:
             return None
         H, W = self.scr.getmaxyx()
-        rows = [self.label(i) for i in items]
+        labels = [it["label"] for it in items]
         n = len(items)
-        w = min(W, max(18, max(len(r[0]) for r in rows) + 6, len(title) + 6 if title else 0))
-        h = min(n + 2, H - 1)
-        if h < 3:
+        lw = max(len(l) for l in labels)
+        sub = self.B["sub"]
+
+        def row_at(i):
+            mark = sub if items[i].get("sub") is not None else " "
+            return (labels[i].ljust(lw + 2) + mark,), None
+
+        over = self.table_overhead(title, None)
+        w = min(W, max(lw + 9, len(title) + 6 if title else 0, 20))
+        h = min(n + over, H - 1)
+        if h < over + 1:
             return None
         y = max(0, min(y, H - 1 - h))
         x = max(0, min(x, W - w))
         win = curses.newwin(h, w, y, x)
         win.keypad(True)
         win.bkgd(" ", self.norm)
-        sel, top, inner = 0, 0, h - 2
+        sel, top = 0, 0
+        body = h - over
 
         def draw():
             nonlocal top
-            _, top = clamp_scroll(sel, top, inner, n)
+            _, top = clamp_scroll(sel, top, body, n)
             win.erase()
-            win.box()
-            if title:
-                put(win, 0, 2, f" {title} "[: w - 4], self.bold)
-            self.draw_rows(win, 1, 1, inner, w - 2, n, rows.__getitem__, sel, top)
+            self.draw_table(win, 0, 0, h, w, n, row_at, sel, top, title=title)
             win.noutrefresh()
 
         while True:
@@ -369,14 +564,14 @@ class App:
             elif k in K_DOWN:
                 sel = (sel + 1) % n
             elif k == curses.KEY_PPAGE:
-                sel = max(0, sel - inner)
+                sel = max(0, sel - body)
             elif k == curses.KEY_NPAGE:
-                sel = min(n - 1, sel + inner)
+                sel = min(n - 1, sel + body)
             elif k in K_FWD or k in K_ENTER:
                 it = items[sel]
                 if it.get("sub") is not None:
-                    act = self.popup(self.resolve(it["sub"]), y + 1 + sel - top, x + w - 1,
-                                     lambda: (redraw(), draw()))
+                    act = self.popup(self.resolve(it["sub"]), y + over - 1 + sel - top, x + w - 1,
+                                     lambda: (redraw(), draw()), title=it["label"].upper())
                     if act:
                         return act
                 else:
@@ -387,9 +582,9 @@ class App:
     # ---- dialogs
     def confirm(self, question):
         answer = []
-        items = [item("No", lambda: answer.append(False)), item("Yes", lambda: answer.append(True))]
+        items = [item("NO", lambda: answer.append(False)), item("YES", lambda: answer.append(True))]
         H, W = self.scr.getmaxyx()
-        act = self.popup(items, H // 2 - 2, (W - len(question) - 6) // 2, self.bg, title=question)
+        act = self.popup(items, H // 2 - 3, (W - len(question) - 8) // 2, self.bg, title=question.upper())
         if act:
             act()
         return bool(answer and answer[0])
@@ -397,26 +592,24 @@ class App:
     def prompt(self, label, initial=""):
         """One-line text input. Returns the string, or None on ESC."""
         H, W = self.scr.getmaxyx()
-        w = min(W, max(44, len(label) + 6, len(initial) + 6))
+        w = min(W, max(48, len(label) + 8, len(initial) + 8))
         h = 5
         win = curses.newwin(h, w, max(0, (H - h) // 2), max(0, (W - w) // 2))
         win.keypad(True)
         win.bkgd(" ", self.norm)
         buf = list(initial)
-        field = w - 4
+        field = w - 5
         cursor(1)
         try:
             while True:
                 self.bg()
                 win.erase()
-                win.box()
-                put(win, 0, 2, f" {label} "[: w - 4], self.bold)
                 text = "".join(buf)
                 vis = text[-(field - 1):] if len(text) >= field else text
-                put(win, 2, 2, vis.ljust(field), self.bold | curses.A_UNDERLINE)
-                put(win, 3, 2, "ENTER ok   ESC cancel"[:field], self.dim)
+                self.draw_table(win, 0, 0, h, w, 1, lambda i: ((vis,), self.bold), pointer=False,
+                                title=label.upper(), footer="ENTER ok  ESC cancel")
                 try:
-                    win.move(2, 2 + len(vis))
+                    win.move(3, 2 + len(vis))
                 except curses.error:
                     pass
                 win.noutrefresh()
@@ -440,41 +633,38 @@ class App:
             cursor(0)
 
     def show_text(self, title, lines):
-        """Scrollable info box (used for Details and messages)."""
+        """Scrollable info card (used for Details and messages)."""
         H, W = self.scr.getmaxyx()
-        w = min(W, max(40, max((len(l) for l in lines), default=0) + 4, len(title) + 6))
+        w = min(W, max(44, max((len(l) for l in lines), default=0) + 6, len(title) + 8))
         wrapped = []
         for line in lines:
-            wrapped += textwrap.wrap(line, max(10, w - 4), subsequent_indent="    ",
+            wrapped += textwrap.wrap(line, max(10, w - 5), subsequent_indent="    ",
                                      drop_whitespace=False) or [""]
-        h = max(5, min(H - 1, len(wrapped) + 4))
+        over = self.table_overhead(title, None)
+        h = max(over + 1, min(H - 1, len(wrapped) + over))
+        body = h - over
         win = curses.newwin(h, w, max(0, (H - h) // 2), max(0, (W - w) // 2))
         win.keypad(True)
         win.bkgd(" ", self.norm)
-        inner = max(1, h - 4)
         top = 0
+        maxtop = max(0, len(wrapped) - body)
         while True:
             self.bg()
             win.erase()
-            win.box()
-            put(win, 0, 2, f" {title} "[: w - 4], self.bold)
-            for i in range(inner):
-                if top + i < len(wrapped):
-                    put(win, 1 + i, 2, wrapped[top + i][: w - 4])
-            hint = "LEFT/ENTER close" + ("   UP/DN scroll" if len(wrapped) > inner else "")
-            put(win, h - 2, 2, hint[: w - 4], self.dim)
+            hint = "LEFT/ENTER close" + ("  UP/DN scroll" if maxtop else "")
+            self.draw_table(win, 0, 0, h, w, len(wrapped), lambda i: ((wrapped[i],), None),
+                            top=top, title=title.upper(), pointer=False, footer=hint)
             win.noutrefresh()
             curses.doupdate()
             k = win.getch()
-            maxtop = max(0, len(wrapped) - inner)
             if k in K_UP:
                 top = max(0, top - 1)
             elif k in K_DOWN:
                 top = min(maxtop, top + 1)
             elif k == curses.KEY_PPAGE:
-                top = max(0, top - inner)
+                top = max(0, top - body)
             elif k == curses.KEY_NPAGE:
-                top = min(maxtop, top + inner)
+                top = min(maxtop, top + body)
             elif k in K_BACK or k in K_ENTER or k in K_FWD or k == curses.KEY_RESIZE:
                 return
 
@@ -503,23 +693,24 @@ class App:
 
     def open_terminal(self, path):
         shell = shlex.split(self.cfg["shell"]) or ["/bin/sh"]
-        self.run(shell, cwd=path, note=f"\n[ RetroMenu terminal in {path} -- type 'exit' to return ]\n")
+        self.run(shell, cwd=path, note=f"\n[ {SYSTEM_NAME} terminal in {path} -- type 'exit' to return ]\n")
 
     # ---- main menu
     def main_items(self):
         c = self.cfg
         items = [
-            item("Files", self.files.run),
-            item("Terminal", lambda: self.open_terminal(os.path.expanduser("~"))),
-            item(c["monitor_name"], lambda: self.run(c["monitor_cmd"])),
+            item("Files", self.files.run, desc="Browse and manage files"),
+            item("Terminal", lambda: self.open_terminal(os.path.expanduser("~")),
+                 desc="Open the full command line"),
+            item(c["monitor_name"], lambda: self.run(c["monitor_cmd"]), desc="Running processes"),
         ]
         items += [self.plugin_item(p) for p in self.plugins]
         if not self.plugins:
-            items.append(item("Placeholder", self.plugin_help))
+            items.append(item("Placeholder", self.plugin_help, desc="Add your own programs"))
         items += [
-            item("Settings", self.settings),
-            item("Reboot", self.reboot),
-            item("Exit", lambda: EXIT),
+            item("Settings", self.settings, desc="Customize this home screen"),
+            item("Reboot", self.reboot, desc="Restart the system"),
+            item("Exit", lambda: EXIT, desc="Leave the menu"),
         ]
         return items
 
@@ -544,11 +735,13 @@ class App:
                 items.append(item("Launch", launch(p["command"], p.get("pause", False))))
             return items + [option(o) for o in opts]
 
+        desc = p.get("description", "Plugin")
         if p.get("options") or p.get("options_cmd"):
-            return item(p["name"], sub=build)
+            return item(p["name"], sub=build, desc=desc)
         if p.get("command"):
-            return item(p["name"], launch(p["command"], p.get("pause", False)))
-        return item(p["name"], lambda: self.show_text(p["name"], ["This plugin has no command or options."]))
+            return item(p["name"], launch(p["command"], p.get("pause", False)), desc=desc)
+        return item(p["name"], lambda: self.show_text(p["name"], ["This plugin has no command or options."]),
+                    desc=desc)
 
     def enumerate_options(self, cmd):
         """Ask a program for its own options: it must print a JSON list on stdout."""
@@ -568,6 +761,7 @@ class App:
             "",
             "Example:",
             '  { "name": "Network",',
+            '    "description": "Wifi and IP tools",',
             '    "command": "nmtui",',
             '    "options": [',
             '      { "label": "Show IP", "command": "ip a", "pause": true },',
@@ -590,7 +784,9 @@ class App:
             save_config(self.cfg)
         except OSError as e:
             self.show_text("ERROR", [f"Could not save settings: {e.strerror}"])
-        if key == "theme":
+        if key in ("theme", "console_palette"):
+            if key == "console_palette" and not value:
+                console_palette_reset()
             self.apply_theme()
 
     def edit(self, key, label):
@@ -600,30 +796,31 @@ class App:
 
     def settings(self):
         c = self.cfg
-        onoff = lambda v: "on" if v else "off"
+        onoff = lambda v: "ON" if v else "OFF"
 
         def build():
             return [
-                item(f"Theme ........... {c['theme']}",
-                     sub=lambda: [item(t, lambda t=t: self.set("theme", t)) for t in THEMES]),
-                item(f"Monitor name .... {c['monitor_name']}",
-                     lambda: self.edit("monitor_name", "Name in main menu")),
-                item(f"Monitor command . {c['monitor_cmd']}",
-                     lambda: self.edit("monitor_cmd", "Command to run")),
-                item(f"Shell ........... {c['shell']}", lambda: self.edit("shell", "Shell")),
-                item(f"Editor .......... {c['editor']}", lambda: self.edit("editor", "Editor")),
-                item(f"Pager ........... {c['pager']}", lambda: self.edit("pager", "Pager")),
-                item(f"Hidden files .... {onoff(c['show_hidden'])}",
-                     lambda: self.set("show_hidden", not c["show_hidden"])),
-                item(f"Boot splash ..... {onoff(c['splash'])}",
-                     lambda: self.set("splash", not c["splash"])),
-                item(f"Reboot command .. {c['reboot_cmd']}",
-                     lambda: self.edit("reboot_cmd", "Reboot command")),
-                item("Reload plugins", self.reload_plugins),
-                item("Reset to defaults", sub=[item("No"), item("Yes, reset", self.reset)]),
+                item("Theme", desc=c["theme"].upper(),
+                     sub=lambda: [item(t.upper(), lambda t=t: self.set("theme", t)) for t in THEMES]),
+                item("Monitor name", lambda: self.edit("monitor_name", "Name in main menu"),
+                     desc=c["monitor_name"]),
+                item("Monitor command", lambda: self.edit("monitor_cmd", "Command to run"),
+                     desc=c["monitor_cmd"]),
+                item("Shell", lambda: self.edit("shell", "Shell"), desc=c["shell"]),
+                item("Editor", lambda: self.edit("editor", "Editor"), desc=c["editor"]),
+                item("Pager", lambda: self.edit("pager", "Pager"), desc=c["pager"]),
+                item("Hidden files", lambda: self.set("show_hidden", not c["show_hidden"]),
+                     desc=onoff(c["show_hidden"])),
+                item("Boot splash", lambda: self.set("splash", not c["splash"]), desc=onoff(c["splash"])),
+                item("Console palette", lambda: self.set("console_palette", not c["console_palette"]),
+                     desc=onoff(c["console_palette"]) + " (Linux console only)"),
+                item("Reboot command", lambda: self.edit("reboot_cmd", "Reboot command"),
+                     desc=c["reboot_cmd"]),
+                item("Reload plugins", self.reload_plugins, desc=f"{len(self.plugins)} loaded"),
+                item("Reset to defaults", sub=[item("NO"), item("YES, RESET", self.reset)]),
             ]
 
-        self.menu_screen("SETTINGS", build)
+        self.menu_screen("SETTINGS", build, headers=("SETTING", "VALUE"))
 
     def reset(self):
         self.cfg.clear()
@@ -642,34 +839,74 @@ class App:
                     break
         self.run(cmd, pause=True, note="\n[ Rebooting... ]\n")
 
-    # ---- boot splash (does real work: loads plugins and pre-reads ~)
+    # ---- boot screen (does real work while it draws)
     def splash(self):
+        log = []
+
+        def step(label, fn):
+            result = fn()
+            log.append((label, result or "OK"))
+
+        def plugins():
+            self.reload_plugins()
+            return f"{len(self.plugins)} FOUND"
+
+        def home():
+            self.files.load()
+            return f"{len(self.files.entries)} ENTRIES"
+
         steps = [
-            ("LOADING CONFIG", lambda: None),
-            ("SCANNING PLUGINS", self.reload_plugins),
-            ("INDEXING HOME", self.files.load),
-            ("READY", lambda: None),
+            ("CONFIGURATION", lambda: None),
+            ("TERMINAL", lambda: f"{curses.COLORS} COLOURS" if self.colors else "MONO"),
+            ("PLUGINS", plugins),
+            ("HOME DIRECTORY", home),
         ]
-        for i, (name, fn) in enumerate(steps):
-            fn()
-            if not self.cfg.get("splash"):
-                continue
-            H, W = self.scr.getmaxyx()
-            self.scr.erase()
-            y = max(0, H // 2 - 5)
+        show = self.cfg.get("splash")
+        for i, (label, fn) in enumerate(steps):
+            step(label, fn)
+            if show:
+                self.draw_splash(log, (i + 1) / (len(steps) + 1))
+                time.sleep(0.05)
+        if show:
+            for f in range(4):  # finish the bar
+                self.draw_splash(log, (len(steps) + (f + 1) / 4) / (len(steps) + 1))
+                time.sleep(0.03)
+            time.sleep(0.15)
+
+    def draw_splash(self, log, progress):
+        H, W = self.scr.getmaxyx()
+        self.scr.erase()
+        bw = len(BANNER[0])
+        y = max(0, H // 2 - 9)
+        if W >= bw + 2:
+            x = (W - bw) // 2
             for j, line in enumerate(BANNER):
-                put(self.scr, y + j, (W - len(line)) // 2, line, self.bold)
-            bar_w = max(10, min(40, W - 6))
-            filled = bar_w * (i + 1) // len(steps)
-            bar = "[" + "#" * filled + "." * (bar_w - filled) + "]"
-            put(self.scr, y + 7, (W - len(bar)) // 2, bar, self.bold)
-            put(self.scr, y + 8, (W - len(name)) // 2, name, self.dim)
-            self.scr.refresh()
-            time.sleep(0.06)
+                put(self.scr, y + j, x, line, self.bold)
+            put(self.scr, y + 5, x + bw - len(TAGLINE), TAGLINE, self.norm)
+        else:
+            x = 1
+            put(self.scr, y, 1, SYSTEM_NAME, self.bold)
+        lx = max(1, (W - 44) // 2)
+        for j, (label, result) in enumerate(log):
+            dots = "." * max(2, 30 - len(label))
+            put(self.scr, y + 8 + j, lx, f"{label} {dots} ", self.norm)
+            put(self.scr, y + 8 + j, lx + len(label) + len(dots) + 2, result, self.bold)
+        bar_w = max(10, min(44, W - 4))
+        filled = int(bar_w * min(1.0, progress))
+        by = y + 9 + 4
+        put(self.scr, by, (W - bar_w) // 2, self.B["block"] * filled, self.bold)
+        put(self.scr, by, (W - bar_w) // 2 + filled, self.B["shade"] * (bar_w - filled), self.dim)
+        put(self.scr, min(H - 1, by + 3), max(0, (W - len(COPYRIGHT)) // 2), COPYRIGHT, self.dim)
+        self.scr.refresh()
 
 
 # ---------------------------------------------------------------- file manager
 class FileManager:
+    HEADERS_WIDE = ("PERMISSIONS", "SIZE", "MODIFIED", "NAME")
+    WIDTHS_WIDE = (14, 9, 18)
+    HEADERS_NARROW = ("SIZE", "NAME")
+    WIDTHS_NARROW = (10,)
+
     def __init__(self, app):
         self.app = app
         self.cwd = os.path.expanduser("~")
@@ -678,7 +915,7 @@ class FileManager:
         self.entries = []
         self.error = None
         self.sel = self.top = 0
-        self.inner = 10
+        self.body = 10
 
     def load(self, force=False):
         path = self.cwd
@@ -707,41 +944,56 @@ class FileManager:
             self.cache.pop(next(iter(self.cache)))
         self.entries = entries
 
-    def row(self, i):
+    def row(self, i, wide):
+        a = self.app
         e = self.entries[i]
+        st = e.st()
+        name = e.name + ("/" if e.is_dir else "") + (" @" if e.is_link else "")
         if e.is_dir:
-            return ("[+] " + e.name + "/" + ("@" if e.is_link else ""), "<DIR>")
-        size = e.size()
-        return ("    " + e.name + ("@" if e.is_link else ""), human_size(size) if size >= 0 else "?")
+            size = "<DIR>"
+        else:
+            size = human_size(st.st_size) if st else "?"
+        attr = a.bold if e.is_dir else (a.dim if e.name.startswith(".") else a.norm)
+        if not wide:
+            return (size.rjust(7), name), attr
+        perms = stat.filemode(st.st_mode) if st else "?" * 10
+        mtime = time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime)) if st else ""
+        return (perms, size.rjust(6), mtime, name), attr
 
     def run(self):
         a = self.app
         while True:
             self.load()  # one cheap stat; rescans only if the folder changed
             n = len(self.entries)
-            self.sel, self.top = clamp_scroll(self.sel, self.top, self.inner, n)
+            self.sel, self.top = clamp_scroll(self.sel, self.top, self.body, n)
 
             def draw():
                 H, W = a.scr.getmaxyx()
                 a.scr.erase()
+                wide = W >= 70
+                headers = self.HEADERS_WIDE if wide else self.HEADERS_NARROW
+                widths = self.WIDTHS_WIDE if wide else self.WIDTHS_NARROW
                 path = self.cwd
-                room = W - 12
+                room = W - 14
                 if len(path) > room:
                     path = "..." + path[-(room - 3):]
-                put(a.scr, 0, 0, (" FILES :: " + path).ljust(W), a.bold)
-                bh = max(3, H - 2)
-                self.inner = bh - 2
-                self.sel, self.top = clamp_scroll(self.sel, self.top, self.inner, n)
-                a.box(a.scr, 1, 0, bh, W, f"{n} items")
+                title = f"FILES :: {path}"
+                over = a.table_overhead(title, headers)
+                self.body = max(1, H - 1 - over)
+                self.sel, self.top = clamp_scroll(self.sel, self.top, self.body, n)
+                a.draw_table(a.scr, 0, 0, H - 1, W, n, lambda i: self.row(i, wide), self.sel, self.top,
+                             title=title, headers=headers, widths=widths,
+                             footer=f"{n} ITEM" + ("" if n == 1 else "S") + ("  +HIDDEN" if a.cfg["show_hidden"] else ""))
                 if self.error:
-                    put(a.scr, 2, 2, f"Cannot read folder: {self.error}", a.bold)
+                    put(a.scr, over - 1, 3, f"CANNOT READ FOLDER: {self.error}", a.bold)
                 elif n == 0:
-                    put(a.scr, 2, 2, "(empty folder - press ENTER for options)", a.dim)
-                else:
-                    a.draw_rows(a.scr, 2, 1, self.inner, W - 2, n, self.row, self.sel, self.top)
+                    put(a.scr, over - 1, 3, "(EMPTY FOLDER - PRESS ENTER FOR OPTIONS)", a.dim)
                 a.status(H, W, "ENTER actions  RIGHT open  LEFT up  . hidden  q menu")
                 a.scr.noutrefresh()
+                self.name_x = (sum(widths) + len(widths) + 4) if wide else 14
+                self.body_y = over - 1
 
+            self.name_x, self.body_y = 10, 5
             a.bg = draw
             draw()
             curses.doupdate()
@@ -756,9 +1008,9 @@ class FileManager:
             elif k in K_DOWN:
                 self.sel = min(n - 1, self.sel + 1)
             elif k == curses.KEY_PPAGE:
-                self.sel = max(0, self.sel - self.inner)
+                self.sel = max(0, self.sel - self.body)
             elif k == curses.KEY_NPAGE:
-                self.sel = min(n - 1, self.sel + self.inner)
+                self.sel = min(n - 1, self.sel + self.body)
             elif k == curses.KEY_HOME:
                 self.sel = 0
             elif k == curses.KEY_END:
@@ -803,9 +1055,9 @@ class FileManager:
     # ---- the ENTER drop-down
     def action_menu(self, draw):
         ent = self.entries[self.sel] if self.entries else None
-        y = 2 + self.sel - self.top
-        x = min(8 + len(ent.name), 40) if ent else 8
-        title = ent.name if ent else os.path.basename(self.cwd) or "/"
+        y = self.body_y + self.sel - self.top
+        x = self.name_x + (min(len(ent.name), 24) if ent else 0)
+        title = (ent.name if ent else os.path.basename(self.cwd) or "/").upper()
         act = self.app.popup(self.actions(ent), y, x, draw, title=title)
         if act:
             act()
@@ -863,36 +1115,36 @@ class FileManager:
             group = str(st.st_gid)
         fmt = lambda t: time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t))
         lines = [
-            f"Name     : {ent.name}",
-            f"Path     : {ent.path}",
-            f"Type     : {kind}",
+            f"NAME     : {ent.name}",
+            f"PATH     : {ent.path}",
+            f"TYPE     : {kind}",
         ]
         if stat.S_ISLNK(m):
             try:
-                lines.append(f"Points to: {os.readlink(ent.path)}")
+                lines.append(f"TARGET   : {os.readlink(ent.path)}")
             except OSError:
                 pass
         if ent.is_dir:
             try:
-                lines.append(f"Contains : {len(os.listdir(ent.path))} items")
+                lines.append(f"CONTAINS : {len(os.listdir(ent.path))} items")
             except OSError:
-                lines.append("Contains : (no access)")
+                lines.append("CONTAINS : (no access)")
         else:
-            lines.append(f"Size     : {human_size(st.st_size)} ({st.st_size} bytes)")
+            lines.append(f"SIZE     : {human_size(st.st_size)} ({st.st_size} bytes)")
         mime = mimetypes.guess_type(ent.name)[0]
         lines += [
-            f"Perms    : {stat.filemode(m)} ({oct(m & 0o7777)})",
-            f"Owner    : {owner}:{group}",
-            f"Modified : {fmt(st.st_mtime)}",
-            f"Accessed : {fmt(st.st_atime)}",
-            f"Changed  : {fmt(st.st_ctime)}",
-            f"Inode    : {st.st_ino}   Links: {st.st_nlink}",
+            f"PERMS    : {stat.filemode(m)} ({oct(m & 0o7777)})",
+            f"OWNER    : {owner}:{group}",
+            f"MODIFIED : {fmt(st.st_mtime)}",
+            f"ACCESSED : {fmt(st.st_atime)}",
+            f"CHANGED  : {fmt(st.st_ctime)}",
+            f"INODE    : {st.st_ino}   LINKS: {st.st_nlink}",
             f"MIME     : {mime or 'unknown'}",
         ]
         if shutil.which("file"):
             try:
                 out = subprocess.run(["file", "-b", ent.path], capture_output=True, text=True, timeout=2)
-                lines.append(f"Content  : {out.stdout.strip()}")
+                lines.append(f"CONTENT  : {out.stdout.strip()}")
             except (OSError, subprocess.SubprocessError):
                 pass
         self.app.show_text("DETAILS", lines)
@@ -961,7 +1213,7 @@ class FileManager:
 def main(scr):
     app = App(scr)
     app.splash()
-    app.menu_screen("MENU", app.main_items, root=True)
+    app.menu_screen("MAIN MENU", app.main_items, root=True)
 
 
 if __name__ == "__main__":
@@ -971,3 +1223,5 @@ if __name__ == "__main__":
         curses.wrapper(main)
     except KeyboardInterrupt:
         pass
+    finally:
+        console_palette_reset()
