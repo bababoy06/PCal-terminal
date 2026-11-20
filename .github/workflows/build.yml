@@ -1,0 +1,82 @@
+name: build
+
+# Every push and PR: build the binaries and smoke-test them.
+# A tag like v0.4 also publishes them as a GitHub Release.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  musl:
+    name: linux-x86_64-musl (Alpine / Pontes-Calos)
+    runs-on: ubuntu-latest
+    container: alpine:3.22
+    steps:
+      - name: Install build tools
+        run: apk add --no-cache git python3 py3-pip binutils ncurses-terminfo-base build-base zlib-dev python3-dev
+      - uses: actions/checkout@v4
+      - name: Install PyInstaller
+        run: |
+          python3 -m venv /opt/venv
+          /opt/venv/bin/pip install --quiet pyinstaller
+      - name: Build
+        run: PYTHON=/opt/venv/bin/python sh build/build.sh
+      - name: Smoke test (folder build)
+        run: python3 tests/smoke_test.py dist/onedir/pontes/pontes
+      - name: Smoke test (single file)
+        run: python3 tests/smoke_test.py dist/release/pontes-linux-x86_64-musl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64-musl
+          path: dist/release/*
+
+  glibc:
+    name: linux-x86_64-glibc (Debian / Ubuntu / Fedora / Arch)
+    runs-on: ubuntu-22.04 # older glibc = runs on more systems
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PyInstaller
+        run: python -m pip install --quiet pyinstaller
+      - name: Build
+        run: PYTHON=python sh build/build.sh
+      - name: Smoke test (folder build)
+        run: python tests/smoke_test.py dist/onedir/pontes/pontes
+      - name: Smoke test (single file)
+        run: python tests/smoke_test.py dist/release/pontes-linux-x86_64-glibc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64-glibc
+          path: dist/release/*
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [musl, glibc]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must match VERSION in retromenu.py
+        run: |
+          VERSION=$(python3 -c 'import re; print(re.search(r"VERSION = \"([^\"]+)\"", open("retromenu/retromenu.py").read()).group(1))')
+          if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match VERSION $VERSION"
+            exit 1
+          fi
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "Pontes-Calos $GITHUB_REF_NAME" --generate-notes

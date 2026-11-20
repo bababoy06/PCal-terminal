@@ -29,7 +29,7 @@ import sys
 import textwrap
 import time
 
-VERSION = "0.3"
+VERSION = "0.4"
 SYSTEM_NAME = "PONTES-CALOS"
 TAGLINE = "A PONTES-CALOS SYSTEM"
 COPYRIGHT = "(C) PONTES-CALOS DATA SYSTEMS"
@@ -1451,7 +1451,11 @@ def main(scr):
     app.menu_screen("MAIN MENU", app.main_items, root=True)
 
 
-if __name__ == "__main__":
+def entry():
+    """Start the menu (used by `python3 retromenu.py` and by the pontes binary)."""
+    if len(sys.argv) > 1 and sys.argv[1] in ("-V", "--version"):
+        print(f"retromenu {VERSION}")
+        return 0
     os.environ.setdefault("ESCDELAY", "25")  # ESC feels instant instead of a 1s delay
     locale.setlocale(locale.LC_ALL, "")
     try:
@@ -1460,3 +1464,8 @@ if __name__ == "__main__":
         pass
     finally:
         console_palette_reset()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(entry())
