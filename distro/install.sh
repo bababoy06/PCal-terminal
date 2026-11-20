@@ -6,8 +6,8 @@
 #
 # What it does (all reversible with --uninstall):
 #   - installs python3 + the few packages the menu uses
-#   - installs RetroMenu to /usr/local/bin/retromenu
-#   - logs USER in automatically on tty1 and starts the menu there
+#   - installs RetroMenu to /usr/local/bin/retromenu and RetroLogin to /usr/local/bin/retrologin
+#   - shows the retro login screen on tty1; after login the menu starts
 #     (tty2..tty6 stay normal password logins: your safety net, Alt+F2)
 #   - lets USER reboot / power off from the menu without a password (doas)
 #   - UTF-8 console with the Terminus font, so the boxes draw properly
@@ -16,6 +16,7 @@ set -eu
 REPO_RAW="https://raw.githubusercontent.com/bababoy06/Pontes-Calos/main"
 ROOT="${ROOT:-}"  # only for testing in a fake root
 BIN="$ROOT/usr/local/bin/retromenu"
+LOGIN_BIN="$ROOT/usr/local/bin/retrologin"
 SHARE="$ROOT/usr/share/retromenu"
 INITTAB="$ROOT/etc/inittab"
 DOAS_RULE="$ROOT/etc/doas.d/retromenu.conf"
@@ -33,20 +34,22 @@ usage() {
 Usage: install.sh [options] [USER]
 
   USER            account that gets the menu on tty1 (default: first user in /home)
-  --no-autologin  install the menu, but log in with a password on tty1 as usual
+  --plain-login   keep the normal text login on tty1 (the menu still starts after it)
+  --autologin     no password at all on tty1 (only for a VM or a kiosk!)
   --fast-boot     1 second boot menu and quiet kernel messages (extlinux/BIOS installs)
   --uninstall     undo autologin, autostart, doas rule and fast boot (keeps the program)
   -h, --help      this text
 EOF
 }
 
-AUTOLOGIN=1
+LOGIN_MODE=screen  # screen | plain | auto
 FASTBOOT=0
 UNINSTALL=0
 TARGET=""
 for arg in "$@"; do
     case "$arg" in
-        --no-autologin) AUTOLOGIN=0 ;;
+        --plain-login | --no-autologin) LOGIN_MODE=plain ;;
+        --autologin) LOGIN_MODE=auto ;;
         --fast-boot) FASTBOOT=1 ;;
         --uninstall) UNINSTALL=1 ;;
         -h | --help) usage; exit 0 ;;
@@ -107,21 +110,26 @@ SRC=$(cd "$(dirname "$0")/.." 2>/dev/null && pwd || true)
 if [ -n "$SRC" ] && [ -f "$SRC/retromenu/retromenu.py" ]; then
     say "using RetroMenu from $SRC"
     cp "$SRC/retromenu/retromenu.py" "$TMP/retromenu.py"
+    cp "$SRC/retromenu/retrologin.py" "$TMP/retrologin.py"
     cp "$SRC"/retromenu/plugins/*.json "$TMP/" 2>/dev/null || true
 else
     say "downloading RetroMenu"
     wget -q -O "$TMP/retromenu.py" "$REPO_RAW/retromenu/retromenu.py" \
         || die "download failed. Is the repository public? You can also git clone it and run distro/install.sh"
+    wget -q -O "$TMP/retrologin.py" "$REPO_RAW/retromenu/retrologin.py" || die "download of retrologin failed"
     wget -q -O "$TMP/network.json" "$REPO_RAW/retromenu/plugins/network.json" 2>/dev/null || true
 fi
-python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$TMP/retromenu.py" \
-    || die "retromenu.py is damaged, not installing it"
+for f in retromenu retrologin; do
+    python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$TMP/$f.py" \
+        || die "$f.py is damaged, not installing it"
+done
 mkdir -p "$(dirname "$BIN")" "$SHARE/plugins"
 install -m 755 "$TMP/retromenu.py" "$BIN"
+install -m 755 "$TMP/retrologin.py" "$LOGIN_BIN"
 for f in "$TMP"/*.json; do
     [ -f "$f" ] && cp "$f" "$SHARE/plugins/"
 done
-say "installed /usr/local/bin/retromenu (example plugins in /usr/share/retromenu/plugins)"
+say "installed /usr/local/bin/retromenu and /usr/local/bin/retrologin"
 
 # ---- reboot / power off from the menu without a password
 mkdir -p "$(dirname "$DOAS_RULE")"
@@ -163,19 +171,36 @@ if [ "\$(tty)" = /dev/tty1 ] && [ -z "\${RETROMENU:-}" ]; then
 fi
 $MARK_END
 EOF
-chown "$TARGET" "$PROFILE" 2>/dev/null || true
+touch "$ROOT$HOME_DIR/.hushlogin"  # no "Welcome to Alpine" text between login and menu
+chown "$TARGET" "$PROFILE" "$ROOT$HOME_DIR/.hushlogin" 2>/dev/null || true
 say "menu starts when $TARGET logs in on tty1"
 
-# ---- autologin on tty1 (busybox init)
-if [ "$AUTOLOGIN" = 1 ]; then
+# ---- what runs on tty1 (busybox init)
+set_tty1() {
     [ -f "$INITTAB.retromenu.bak" ] || cp "$INITTAB" "$INITTAB.retromenu.bak"
     if grep -q '^tty1:' "$INITTAB"; then
-        sed -i "s|^tty1:.*|tty1::respawn:/bin/login -f $TARGET|" "$INITTAB"
+        sed -i "s|^tty1:.*|tty1::respawn:$1|" "$INITTAB"
     else
-        echo "tty1::respawn:/bin/login -f $TARGET" >>"$INITTAB"
+        echo "tty1::respawn:$1" >>"$INITTAB"
     fi
-    say "tty1 logs in $TARGET automatically (backup: /etc/inittab.retromenu.bak)"
-fi
+}
+case "$LOGIN_MODE" in
+    screen)
+        set_tty1 "/usr/local/bin/retrologin --user $TARGET"
+        say "tty1 shows the RetroLogin screen (backup: /etc/inittab.retromenu.bak)"
+        HASH=$(awk -F: -v u="$TARGET" '$1 == u { print $2 }' "$ROOT/etc/shadow" 2>/dev/null || true)
+        case "$HASH" in
+            "" | "!"* | "*"*) warn "$TARGET has no password yet, so the login screen can't let them in. Run: passwd $TARGET" ;;
+        esac
+        ;;
+    auto)
+        set_tty1 "/bin/login -f $TARGET"
+        warn "tty1 logs in $TARGET WITHOUT a password. Anyone at the keyboard gets in."
+        ;;
+    plain)
+        say "tty1 keeps the normal login prompt"
+        ;;
+esac
 
 # ---- optional: faster boot
 if [ "$FASTBOOT" = 1 ]; then
@@ -200,7 +225,7 @@ cat <<EOF
   ╔══════════════════════════════════════════════════════╗
   ║          PONTES-CALOS INSTALLED -- reboot now        ║
   ╚══════════════════════════════════════════════════════╝
-  tty1      : RetroMenu ($TARGET)
+  tty1      : $( [ "$LOGIN_MODE" = auto ] && echo "RetroMenu, no password" || echo "login, then RetroMenu" ) ($TARGET)
   Alt+F2    : normal login, if you ever need to fix things
   undo      : sh install.sh --uninstall $TARGET
 

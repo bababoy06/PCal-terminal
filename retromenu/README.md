@@ -19,6 +19,7 @@ Keys: `UP/DOWN` move, `RIGHT/ENTER` open, `LEFT/ESC/q` back, `PGUP/PGDN` scroll.
 | Top         | Runs `top` by default (available on every system). Change it to `htop`, `btop` or anything else in Settings. |
 | Plugins     | One entry per JSON file in `~/.config/retromenu/plugins/` (see `plugins/network.json`). Shows "Placeholder" when there are none. |
 | Settings    | Theme (green/amber/white/cyan), monitor, shell, editor, pager, hidden files, splash, reboot command. Saved to `~/.config/retromenu/config.json`. |
+| Log out     | Leave the menu. On Pontes-Calos this returns to the login screen. |
 | Reboot      | Asks for confirmation, then uses `doas`/`sudo` if needed (password prompt). |
 
 ## Command line under the menu
