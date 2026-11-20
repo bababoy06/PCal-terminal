@@ -26,6 +26,7 @@ Keys: `UP/DOWN` move, `RIGHT/ENTER` open, `LEFT/ESC/q` back, `PGUP/PGDN` scroll.
 
 The `user@host:~$` line under the main menu is a real prompt.
 
+- Press **t** anywhere in the main menu or the file manager to open the full terminal (in the current folder). Type `exit` to come back.
 - Press **i** (like insert mode in vim) or **TAB** to jump into it. **ESC** goes back to the menu. In the menu itself, `h j k l` still navigate.
 - **ENTER** runs the command, and its output appears right under the prompt. **PGUP/PGDN** scrolls the output.
 - **ENTER on an empty line** opens the full terminal.
