@@ -1,0 +1,34 @@
+# Maintainer: bababoy06
+# Alpine package recipe for PCal. Build it with packaging/alpine/build-apk.sh
+# (it fills in pkgver, arch and the checksum, then runs abuild).
+pkgname=pcal
+pkgver=0.6
+pkgrel=0
+pkgdesc="PCal (Pontes-Calos): retro green-CRT home menu and login screen"
+url="https://github.com/bababoy06/Pontes-Calos"
+arch="x86_64"
+license="GPL-3.0-or-later"
+depends="ncurses-terminfo-base doas less file terminus-font"
+# The release build is a PyInstaller bundle with its own Python and libraries:
+# don't strip it and don't turn its bundled libraries into package dependencies.
+options="!check !strip !tracedeps"
+source="pontes-calos-linux-$arch-musl-$pkgver.tar.gz::https://github.com/bababoy06/Pontes-Calos/releases/download/v$pkgver/pontes-calos-linux-$arch-musl.tar.gz
+	LICENSE
+	pcal.profile.sh
+	"
+builddir="$srcdir"
+
+package() {
+	install -d "$pkgdir"/usr/lib/pcal "$pkgdir"/usr/bin "$pkgdir"/usr/share/retromenu/plugins
+	cp -a "$srcdir"/pontes "$pkgdir"/usr/lib/pcal/
+	for name in pontes retromenu retrologin; do
+		ln -s /usr/lib/pcal/pontes/pontes "$pkgdir"/usr/bin/$name
+	done
+	for f in "$srcdir"/pontes/plugins/*.json; do
+		[ -f "$f" ] && install -m644 "$f" "$pkgdir"/usr/share/retromenu/plugins/
+	done
+	install -Dm644 "$srcdir"/pcal.profile.sh "$pkgdir"/etc/profile.d/pcal.sh
+	install -Dm644 "$srcdir"/LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
+}
+
+sha512sums="filled in by build-apk.sh (abuild checksum)"
