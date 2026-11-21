@@ -50,7 +50,7 @@ and publishes them as a GitHub Release.
 
 The **folder build** (`.tar.gz`) starts fastest. It's what the distro uses, because the login screen and menu start again after every logout. The **single file** unpacks itself to `/tmp` on every start, so it's a bit slower, but you can copy one file anywhere and run `./pontes menu`.
 
-Building on your own machine: `pip install pyinstaller && sh build/build.sh`. A build only runs on the same C library it was made on: build on Alpine for musl, on Debian/Ubuntu for glibc.
+Building on your own machine: just `sh build/build.sh`. The first run sets up PyInstaller in `build/.venv` by itself (needs internet once). On Alpine, first install the build tools: `apk add python3 py3-pip binutils build-base zlib-dev python3-dev`. A build only runs on the same C library it was made on: build on Alpine for musl, on Debian/Ubuntu for glibc.
 
 ## Roadmap
 
