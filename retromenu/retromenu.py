@@ -71,6 +71,7 @@ DEFAULT_CONFIG = {
     "splash": True,
     "effects": "subtle",  # off | subtle | full
     "console_palette": True,
+    "box_style": "auto",  # auto: single lines on the Linux console, double elsewhere
     "reboot_cmd": "reboot",
     "poweroff_cmd": "poweroff",
 }
@@ -110,6 +111,10 @@ BANNER = render_banner(SYSTEM_NAME)
 UNICODE_CHARS = dict(tl="╔", tr="╗", bl="╚", br="╝", h="═", v="║", lt="╠", rt="╣",
                      tt="╦", bt="╩", x="╬", ptr="►", sub="»", up="▲", down="▼",
                      block="█", shade="░")
+# Single lines: in practically every console font (many lack the double-line set)
+SINGLE_CHARS = dict(UNICODE_CHARS, tl="┌", tr="┐", bl="└", br="┘", h="─", v="│", lt="├", rt="┤",
+                    tt="┬", bt="┴", x="┼")
+BOX_STYLES = ("auto", "double", "single", "ascii")
 ASCII_CHARS = dict(tl="+", tr="+", bl="+", br="+", h="=", v="|", lt="+", rt="+",
                    tt="+", bt="+", x="+", ptr=">", sub=">>", up="^", down="v",
                    block="#", shade=".")
@@ -334,8 +339,8 @@ class App:
             enc = locale.nl_langinfo(locale.CODESET)
         except (AttributeError, ValueError):
             enc = locale.getpreferredencoding(False) or ""
-        enc = enc.upper().replace("-", "")
-        self.B = UNICODE_CHARS if enc == "UTF8" else ASCII_CHARS
+        self.utf8 = enc.upper().replace("-", "") == "UTF8"
+        self.B = self.box_chars()
         curses.raw()  # Ctrl-C / Ctrl-Z don't kill the home screen
         cursor(0)
         scr.keypad(True)
@@ -350,6 +355,14 @@ class App:
         self.con_cwd = os.path.expanduser("~")
         self.con_buf, self.con_cur, self.con_out, self.con_top, self.con_rows = "", 0, [], 0, 0
         self.history, self.hist_i, self.hist_saved = self.load_history(), None, ""
+
+    def box_chars(self):
+        style = self.cfg.get("box_style", "auto")
+        if not self.utf8 or style == "ascii":
+            return ASCII_CHARS
+        if style == "double" or (style != "single" and os.environ.get("TERM") != "linux"):
+            return UNICODE_CHARS
+        return SINGLE_CHARS
 
     # ---- colours
     def apply_theme(self):
@@ -376,7 +389,9 @@ class App:
             self.norm = curses.color_pair(1)
             self.bold = curses.color_pair(2) | curses.A_BOLD
             self.dim = curses.color_pair(3) | (curses.A_DIM if curses.COLORS < 256 else 0)
-            self.sel = curses.color_pair(4) | curses.A_BOLD
+            # On a 16-colour console "bold black" becomes colour 8, which PCal's palette makes
+            # dim amber/green: unreadable on the bar. So no bold there.
+            self.sel = curses.color_pair(4) | (curses.A_BOLD if curses.COLORS >= 256 else 0)
         self.scr.bkgd(" ", self.norm)
 
     # ---- the boxed table: used for every menu, popup and dialog
@@ -1140,6 +1155,8 @@ class App:
             save_config(self.cfg)
         except OSError as e:
             self.show_text("ERROR", [f"Could not save settings: {e.strerror}"])
+        if key == "box_style":
+            self.B = self.box_chars()
         if key in ("theme", "console_palette"):
             if key == "console_palette" and not value:
                 console_palette_reset()
@@ -1168,6 +1185,8 @@ class App:
                 item("Hidden files", lambda: self.set("show_hidden", not c["show_hidden"]),
                      desc=onoff(c["show_hidden"])),
                 item("Boot splash", lambda: self.set("splash", not c["splash"]), desc=onoff(c["splash"])),
+                item("Box style", desc=c.get("box_style", "auto").upper() + "  (lines of menus and boxes)",
+                     sub=lambda: [item(v.upper(), lambda v=v: self.set("box_style", v)) for v in BOX_STYLES]),
                 item("Effects", desc=self.fx.upper() + "  (CRT power on/off, afterglow)",
                      sub=lambda: [item(v.upper(), lambda v=v: self.set("effects", v))
                                   for v in ("off", "subtle", "full")]),

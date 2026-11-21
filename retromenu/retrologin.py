@@ -128,7 +128,7 @@ def put(win, y, x, text, attr=0):
 
 
 class LoginScreen:
-    def __init__(self, scr, default_user, theme, effects="subtle"):
+    def __init__(self, scr, default_user, theme, effects="subtle", box_style="auto"):
         self.scr = scr
         self.user = default_user
         self.password = ""
@@ -143,11 +143,17 @@ class LoginScreen:
         except OSError:
             self.tty = "console"
         enc = locale.nl_langinfo(locale.CODESET).upper().replace("-", "")
-        u = enc == "UTF8"
-        self.B = dict(tl="╔" if u else "+", tr="╗" if u else "+", bl="╚" if u else "+",
-                      br="╝" if u else "+", h="═" if u else "=", v="║" if u else "|",
-                      lt="╠" if u else "+", rt="╣" if u else "+", block="█" if u else "#",
-                      shade="░" if u else ".", dot="•" if u else "*")
+        u = enc == "UTF8" and box_style != "ascii"
+        # single lines on the Linux console (many console fonts lack the double-line set)
+        single = box_style == "single" or (box_style != "double" and os.environ.get("TERM") == "linux")
+        if not u:
+            lines = "++++=|++"
+        elif single:
+            lines = "┌┐└┘─│├┤"
+        else:
+            lines = "╔╗╚╝═║╠╣"
+        self.B = dict(zip(("tl", "tr", "bl", "br", "h", "v", "lt", "rt"), lines))
+        self.B.update(block="█" if u else "#", shade="░" if u else ".", dot="•" if u else "*")
         curses.raw()
         scr.keypad(True)
         self.set_theme(theme)
@@ -176,7 +182,8 @@ class LoginScreen:
             self.norm = curses.color_pair(1)
             self.bold = curses.color_pair(2) | curses.A_BOLD
             self.dim = curses.color_pair(3)
-            self.sel = curses.color_pair(4) | curses.A_BOLD
+            # no bold on 16 colours: "bold black" turns into the dim palette colour there
+            self.sel = curses.color_pair(4) | (curses.A_BOLD if curses.COLORS >= 256 else 0)
         else:
             self.norm, self.bold = curses.A_NORMAL, curses.A_BOLD
             self.dim, self.sel = curses.A_DIM, curses.A_REVERSE
@@ -362,9 +369,9 @@ def user_settings(user):
         home = pwd.getpwnam(user).pw_dir
         with open(os.path.join(home, ".config", "retromenu", "config.json")) as f:
             cfg = json.load(f)
-        return cfg.get("theme", "green"), cfg.get("effects", "subtle")
+        return cfg.get("theme", "green"), cfg.get("effects", "subtle"), cfg.get("box_style", "auto")
     except (KeyError, OSError, ValueError, AttributeError):
-        return "green", "subtle"
+        return "green", "subtle", "auto"
 
 
 def main():
@@ -390,8 +397,8 @@ def main():
     except locale.Error:
         locale.setlocale(locale.LC_ALL, "C")
 
-    theme, effects = user_settings(default_user)
-    user = curses.wrapper(lambda scr: LoginScreen(scr, default_user, theme, effects).run())
+    theme, effects, box_style = user_settings(default_user)
+    user = curses.wrapper(lambda scr: LoginScreen(scr, default_user, theme, effects, box_style).run())
     # Hand over: login -f skips its own password prompt (we already checked) and
     # sets up the session, utmp, HOME and the user's shell.
     os.execv(login_cmd, [os.path.basename(login_cmd), "-f", user])
