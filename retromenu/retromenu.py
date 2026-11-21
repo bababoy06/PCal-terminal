@@ -32,9 +32,10 @@ import sys
 import textwrap
 import time
 
-VERSION = "0.5"
+VERSION = "0.6"
 SYSTEM_NAME = "PONTES-CALOS"
-TAGLINE = "A PONTES-CALOS SYSTEM"
+SHORT_NAME = "PCal"
+TAGLINE = f"PCAL {VERSION} -- A PONTES-CALOS SYSTEM"
 COPYRIGHT = "(C) PONTES-CALOS DATA SYSTEMS"
 
 CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "retromenu")
@@ -539,7 +540,7 @@ class App:
             put(self.scr, 5, x + len(BANNER[0]) - len(TAGLINE), TAGLINE, self.norm)
             y = 7
         else:
-            put(self.scr, 0, 1, f"{SYSTEM_NAME} :: {TAGLINE}"[: W - 2], self.bold)
+            put(self.scr, 0, 1, f"PCAL {VERSION} :: A PONTES-CALOS SYSTEM"[: W - 2], self.bold)
             y = 1
         if info:
             line = f"USER {self.user}  HOST {self.host}  {sysinfo()}"
@@ -1047,7 +1048,7 @@ class App:
 
     def open_terminal(self, path):
         shell = shlex.split(self.cfg["shell"]) or ["/bin/sh"]
-        self.run(shell, cwd=path, note=f"\n[ {SYSTEM_NAME} terminal in {path} -- type 'exit' to return ]\n")
+        self.run(shell, cwd=path, note=f"\n[ {SHORT_NAME} terminal in {path} -- type 'exit' to return ]\n")
 
     # ---- main menu
     def main_items(self):

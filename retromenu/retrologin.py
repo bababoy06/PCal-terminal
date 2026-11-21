@@ -25,7 +25,7 @@ import time
 import warnings
 
 SYSTEM_NAME = "PONTES-CALOS"
-TAGLINE = "A PONTES-CALOS SYSTEM"
+TAGLINE = "PCAL -- A PONTES-CALOS SYSTEM"
 COPYRIGHT = "(C) PONTES-CALOS DATA SYSTEMS"
 SHADOW = "/etc/shadow"
 DELAY_AFTER_FAIL = 2  # seconds, every wrong password

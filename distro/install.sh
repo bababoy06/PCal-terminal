@@ -31,9 +31,9 @@ MARK_BEGIN="# >>> retromenu autostart >>>"
 MARK_END="# <<< retromenu autostart <<<"
 FONT="ter-v16n.psf.gz"
 
-say() { printf '\033[32m[pontes-calos]\033[0m %s\n' "$*"; }
-warn() { printf '\033[33m[pontes-calos]\033[0m %s\n' "$*"; }
-die() { printf '\033[31m[pontes-calos] %s\033[0m\n' "$*" >&2; exit 1; }
+say() { printf '\033[32m[pcal]\033[0m %s\n' "$*"; }
+warn() { printf '\033[33m[pcal]\033[0m %s\n' "$*"; }
+die() { printf '\033[31m[pcal] %s\033[0m\n' "$*" >&2; exit 1; }
 
 usage() {
     cat <<EOF
@@ -155,7 +155,7 @@ if [ "$MODE" = binary ]; then
         VERSION=$("$TMP/x/pontes/pontes" --version 2>/dev/null) \
             || die "the release program does not run here (wrong CPU type or C library?). Try --from-source"
     else
-        VERSION="pontes-calos (test root)"
+        VERSION="PCal (test root)"
     fi
     rm -rf "$LIBDIR.new"
     mkdir -p "$LIBDIR.new"
@@ -190,7 +190,7 @@ else
     rm -rf "$LIBDIR"
     mkdir -p "$LIBDIR"
     mv "$TMP/src" "$LIBDIR/src"
-    VERSION="pontes-calos $(sed -n 's/^VERSION = "\(.*\)"/\1/p' "$LIBDIR/src/retromenu.py") (Python source)"
+    VERSION="PCal $(sed -n 's/^VERSION = "\(.*\)"/\1/p' "$LIBDIR/src/retromenu.py") (Python source)"
     MENU_LINK=/usr/lib/pontes-calos/src/retromenu.py
     LOGIN_LINK=/usr/lib/pontes-calos/src/retrologin.py
     PONTES_LINK=/usr/lib/pontes-calos/src/pontes.py
@@ -298,7 +298,7 @@ fi
 cat <<EOF
 
   ╔══════════════════════════════════════════════════════╗
-  ║          PONTES-CALOS INSTALLED -- reboot now        ║
+  ║              PCAL INSTALLED -- reboot now            ║
   ╚══════════════════════════════════════════════════════╝
   tty1      : $( [ "$LOGIN_MODE" = auto ] && echo "RetroMenu, no password" || echo "login, then RetroMenu" ) ($TARGET)
   Alt+F2    : normal login, if you ever need to fix things

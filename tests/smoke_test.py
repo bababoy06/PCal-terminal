@@ -138,7 +138,7 @@ def main():
     try:
         # --- version
         s = Session(base + ["--version"], home)
-        check("--version prints the version", s.expect("pontes-calos ") and s.exited() == 0)
+        check("--version prints the version", s.expect("PCal ") and s.exited() == 0)
 
         # --- busybox-style links: a link named retrologin must start the login screen
         if len(base) == 1:

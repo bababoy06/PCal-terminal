@@ -2,7 +2,7 @@
 # Copyright (C) 2026 bababoy06
 # SPDX-License-Identifier: GPL-3.0-or-later
 """
-pontes - Pontes-Calos multi-call program (like busybox).
+pontes - PCal (Pontes-Calos) multi-call program (like busybox).
 
   pontes menu  [args]      the RetroMenu home screen   (also: symlink named retromenu)
   pontes login [args]      the RetroLogin screen       (also: symlink named retrologin)
@@ -28,7 +28,7 @@ def main():
         cmd = args.pop(0) if args else "menu"
     if cmd in ("-V", "--version", "version"):
         import retromenu
-        print(f"pontes-calos {retromenu.VERSION}")
+        print(f"PCal {retromenu.VERSION} (Pontes-Calos)")
         return 0
     if cmd in ("-h", "--help", "help") or cmd not in COMMANDS:
         print(__doc__.strip())
