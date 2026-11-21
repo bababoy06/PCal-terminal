@@ -3,7 +3,7 @@
 # (it fills in pkgver, arch and the checksum, then runs abuild).
 pkgname=pcal
 pkgver=0.6
-pkgrel=0
+pkgrel=1
 pkgdesc="PCal (Pontes-Calos): retro green-CRT home menu and login screen"
 url="https://github.com/bababoy06/Pontes-Calos"
 arch="x86_64"
@@ -15,6 +15,8 @@ options="!check !strip !tracedeps"
 source="pontes-calos-linux-$arch-musl-$pkgver.tar.gz::https://github.com/bababoy06/Pontes-Calos/releases/download/v$pkgver/pontes-calos-linux-$arch-musl.tar.gz
 	LICENSE
 	pcal.profile.sh
+	pcal-setup
+	pcal-live
 	"
 builddir="$srcdir"
 
@@ -28,6 +30,10 @@ package() {
 		[ -f "$f" ] && install -m644 "$f" "$pkgdir"/usr/share/retromenu/plugins/
 	done
 	install -Dm644 "$srcdir"/pcal.profile.sh "$pkgdir"/etc/profile.d/pcal.sh
+	# pcal-setup: login screen, menu autostart, console font... (distro/install.sh)
+	install -Dm755 "$srcdir"/pcal-setup "$pkgdir"/usr/sbin/pcal-setup
+	# pcal-live: tty1 of the live ISO (falls back to a normal login once installed)
+	install -Dm755 "$srcdir"/pcal-live "$pkgdir"/usr/sbin/pcal-live
 	install -Dm644 "$srcdir"/LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
 

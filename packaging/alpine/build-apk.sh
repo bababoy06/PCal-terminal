@@ -43,7 +43,8 @@ trap 'rm -rf "$WORK"' EXIT
 REC=$WORK/pcal/pcal
 mkdir -p "$REC" "$WORK/distfiles"
 sed -e "s/^pkgver=.*/pkgver=$VERSION/" -e "s/^arch=.*/arch=\"$ARCH\"/" "$HERE/APKBUILD" >"$REC/APKBUILD"
-cp "$HERE/pcal.profile.sh" "$REC/"
+cp "$HERE/pcal.profile.sh" "$HERE/pcal-live" "$REC/"
+cp "$TOP/distro/install.sh" "$REC/pcal-setup"
 cp "$TOP/LICENSE" "$REC/"
 # Put the archive where abuild looks for downloads, so nothing is fetched (works for a private repo too)
 cp "$ARCHIVE" "$WORK/distfiles/pontes-calos-linux-$ARCH-musl-$VERSION.tar.gz"

@@ -12,12 +12,14 @@ so PCal has to be one. Bonus: once PCal is a package, updating is just `apk upgr
 | `/usr/bin/pontes`, `retromenu`, `retrologin` | links to it |
 | `/usr/share/retromenu/plugins/` | example plugins |
 | `/etc/profile.d/pcal.sh` | UTF-8 locale for the console |
+| `/usr/sbin/pcal-setup` | the installer (`distro/install.sh`): login screen, menu autostart, doas rule, console font |
+| `/usr/sbin/pcal-live` | tty1 of the live ISO (falls back to a normal login once installed) |
 | `/usr/share/licenses/pcal/LICENSE` | GPL-3.0 |
 
 Depends on: `ncurses-terminfo-base doas less file terminus-font`. No `python3` is needed.
 
-The package doesn't set up the login screen or autologin: that stays the job of
-`distro/install.sh` (and later the ISO installer), because it is per-machine and per-user.
+Installing the package doesn't change your login yet: run `pcal-setup` once (as root) for that,
+because it is per-machine and per-user. It sees the installed package and only does the system setup.
 
 ## Build it (on Alpine)
 
