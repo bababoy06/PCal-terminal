@@ -3,3 +3,4 @@ __pycache__/
 *.iso
 dist/
 build/work/
+build/.venv/
