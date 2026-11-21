@@ -51,8 +51,8 @@ cp "$ARCHIVE" "$WORK/distfiles/pontes-calos-linux-$ARCH-musl-$VERSION.tar.gz"
 echo "packaging PCal $VERSION for $ARCH"
 cd "$REC"
 export SRCDEST="$WORK/distfiles" REPODEST="$OUT"
-abuild checksum
-abuild -P "$OUT"
+abuild checksum || die "abuild could not compute the checksums (see the messages above)"
+abuild -P "$OUT" || die "abuild stopped (exit code $?). The lines starting with >>> above say why"
 
 APK=$(ls "$OUT/pcal/$ARCH/pcal-$VERSION"-r*.apk 2>/dev/null | tail -1)
 [ -n "$APK" ] || die "abuild finished but no package was found in $OUT/pcal/$ARCH"
