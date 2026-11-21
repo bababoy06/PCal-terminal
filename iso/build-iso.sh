@@ -7,6 +7,11 @@
 #   sh build/build.sh                    # 1. release build
 #   sh packaging/alpine/build-apk.sh     # 2. pcal package (dist/apk/pcal)
 #   sh iso/build-iso.sh                  # 3. ISO -> dist/iso/pcal-VERSION-ARCH.iso
+#   sh iso/build-iso.sh --virt           #    or the small ISO for virtual machines:
+#                                        #    dist/iso/pcal-virt-VERSION-ARCH.iso
+#
+# The normal ISO carries firmware for all kinds of real hardware: building it
+# needs about 6 GB of free disk space. The --virt one needs about 1.5 GB.
 #
 # Run as your normal user (in the abuild group, with an abuild signing key).
 # One-time, as root:
@@ -27,6 +32,13 @@ REPO=$TOP/dist/apk/pcal
 WORK=$TOP/dist/iso-work
 OUT=$TOP/dist/iso
 MIRROR=${MIRROR:-https://dl-cdn.alpinelinux.org/alpine}
+PROFILE=pcal NAME=pcal NEED_MB=6000
+case "${1:-}" in
+    --virt) PROFILE=pcalvirt NAME=pcal-virt NEED_MB=1500 ;;
+    "") ;;
+    -h | --help) sed -n '2,/^set -eu/p' "$0" | sed '$d'; exit 0 ;;
+    *) echo "usage: build-iso.sh [--virt]" >&2; exit 1 ;;
+esac
 TOOLS="alpine-sdk alpine-conf syslinux xorriso squashfs-tools grub grub-efi mtools dosfstools git"
 
 [ -f /etc/alpine-release ] || die "build this on Alpine Linux"
@@ -64,8 +76,15 @@ chmod +x "$WORK/aports/scripts/genapkovl-pcal.sh"
 PCAL_PUBKEYS=$(ls "$HOME"/.abuild/*.rsa.pub)
 export PCAL_PUBKEYS
 
-echo "building the PCal $VERSION ISO for $ARCH on Alpine $REL (this takes a few minutes)"
-rm -rf "$WORK/tmp"
+rm -rf "$WORK/tmp"  # leftovers from an earlier (failed) build
+FREE_MB=$(df -Pk "$WORK" | awk 'NR == 2 { print int($4 / 1024) }')
+if [ "$FREE_MB" -lt "$NEED_MB" ]; then
+    hint="make the VM's disk bigger (see iso/README.md)"
+    [ "$PROFILE" = pcal ] && hint="$hint, or build the small VM-only ISO: sh iso/build-iso.sh --virt"
+    die "only $FREE_MB MB free, this ISO needs about $NEED_MB MB while building. $hint"
+fi
+
+echo "building the $NAME $VERSION ISO for $ARCH on Alpine $REL ($FREE_MB MB free; this takes a few minutes)"
 mkdir -p "$WORK/tmp"
 touch "$WORK/started"
 (
@@ -73,18 +92,22 @@ touch "$WORK/started"
     sh mkimage.sh \
         --tag "$VERSION" \
         --arch "$ARCH" \
-        --profile pcal \
+        --profile "$PROFILE" \
         --outdir "$OUT" \
         --workdir "$WORK/tmp" \
         --hostkeys \
         --repository "$MIRROR/$REL/main" \
         --repository "$MIRROR/$REL/community" \
         --repository "$REPO"
-) || die "mkimage failed (see the messages above)"
+) || {
+    rm -rf "$WORK/tmp"
+    die "mkimage failed (see the messages above)"
+}
+rm -rf "$WORK/tmp"  # the unpacked build files take gigabytes
 
 ISO=$(find "$OUT" -maxdepth 1 -name '*.iso' -newer "$WORK/started" | head -1)
 [ -n "$ISO" ] || die "mkimage finished but no new ISO is in $OUT"
-FINAL="$OUT/pcal-$VERSION-$ARCH.iso"
+FINAL="$OUT/$NAME-$VERSION-$ARCH.iso"
 [ "$ISO" = "$FINAL" ] || mv "$ISO" "$FINAL"
 (cd "$OUT" && sha256sum "$(basename "$FINAL")" >"$(basename "$FINAL").sha256")
 echo
