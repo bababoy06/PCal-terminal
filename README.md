@@ -59,3 +59,11 @@ Building on your own machine: `pip install pyinstaller && sh build/build.sh`. A 
 3. ~~Self-contained release program (no Python on the system)~~
 4. Custom ISO built with `mkimage`
 5. ARM build (Raspberry Pi)
+
+## License
+
+PCal (Pontes-Calos) is free software: you can redistribute it and/or modify it under the terms of the
+**GNU General Public License, version 3 or (at your option) any later version**. See [`LICENSE`](LICENSE).
+
+In short: anyone may use, study, share and change PCal. If you share a changed version, or binaries
+built from it, you must share the source code too, under the same license.
