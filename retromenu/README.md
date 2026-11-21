@@ -21,6 +21,7 @@ Keys: `UP/DOWN` move, `RIGHT/ENTER` open, `LEFT/ESC/q` back, `PGUP/PGDN` scroll.
 | Settings    | Theme (green/amber/white/cyan), monitor, shell, editor, pager, hidden files, splash, reboot command. Saved to `~/.config/retromenu/config.json`. |
 | Log out     | Leave the menu. On Pontes-Calos this returns to the login screen. |
 | Reboot      | Asks for confirmation, then uses `doas`/`sudo` if needed (password prompt). |
+| Shut down   | Asks for confirmation, then powers off (`poweroff`, through `doas`/`sudo` when needed). |
 
 ## Command line under the menu
 

@@ -71,6 +71,7 @@ DEFAULT_CONFIG = {
     "effects": "subtle",  # off | subtle | full
     "console_palette": True,
     "reboot_cmd": "reboot",
+    "poweroff_cmd": "poweroff",
 }
 
 # ------------------------------------------------------------------ the look
@@ -1063,6 +1064,7 @@ class App:
         items += [
             item("Settings", self.settings, desc="Customize this home screen"),
             item("Reboot", self.reboot, desc="Restart the system"),
+            item("Shut down", self.shutdown, desc="Power off the computer"),
             item("Log out", lambda: EXIT, desc="Back to the login screen"),
         ]
         return items
@@ -1172,6 +1174,8 @@ class App:
                      desc=onoff(c["console_palette"]) + " (Linux console only)"),
                 item("Reboot command", lambda: self.edit("reboot_cmd", "Reboot command"),
                      desc=c["reboot_cmd"]),
+                item("Shut down command", lambda: self.edit("poweroff_cmd", "Shut down command"),
+                     desc=c["poweroff_cmd"]),
                 item("Reload plugins", self.reload_plugins, desc=f"{len(self.plugins)} loaded"),
                 item("Reset to defaults", sub=[item("NO"), item("YES, RESET", self.reset)]),
             ]
@@ -1185,16 +1189,22 @@ class App:
 
     # ---- reboot
     def reboot(self):
-        if not self.confirm("Reboot now?"):
+        self.power("Reboot now?", self.cfg["reboot_cmd"], "Rebooting...")
+
+    def shutdown(self):
+        self.power("Shut down now?", self.cfg["poweroff_cmd"], "Shutting down...")
+
+    def power(self, question, cmd, note):
+        """Reboot / shut down after a confirmation; uses doas or sudo when not root."""
+        if not self.confirm(question):
             return
-        cmd = self.cfg["reboot_cmd"]
         if os.geteuid() != 0:
             for elevate in ("doas", "sudo"):
                 if shutil.which(elevate):
-                    cmd = f"{elevate} {cmd}"  # asks for the password in the terminal
+                    cmd = f"{elevate} {cmd}"  # no password with the installer's doas rule
                     break
         self.crt(self.bg, on=False)
-        self.run(cmd, pause=True, note="\n[ Rebooting... ]\n")
+        self.run(cmd, pause=True, note=f"\n[ {note} ]\n")
 
     # ---- boot screen (does real work while it draws)
     def splash(self):
