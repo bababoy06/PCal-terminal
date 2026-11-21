@@ -50,11 +50,12 @@ for t in abuild xorriso mksquashfs mformat mkfs.vfat grub-mkimage git; do
 done
 [ -f /usr/share/syslinux/isohdpfx.bin ] || die "syslinux is missing. As root: apk add $TOOLS"
 
-# Which Alpine release this machine runs: the ISO uses the same one (v3.22, ... or edge)
-. /etc/os-release
-case "$VERSION_ID" in
+# Which Alpine release this machine runs: the ISO uses the same one (v3.22, ... or edge).
+# (Only read the number: sourcing /etc/os-release would overwrite NAME and VERSION.)
+ALPINE_VERSION=$(cat /etc/alpine-release)
+case "$ALPINE_VERSION" in
     *_alpha* | *_beta* | *_rc*) REL=edge BRANCH=master ;;
-    *) REL="v${VERSION_ID%.*}" BRANCH="${VERSION_ID%.*}-stable" ;;
+    *) REL="v${ALPINE_VERSION%.*}" BRANCH="${ALPINE_VERSION%.*}-stable" ;;
 esac
 
 APK=$(ls "$REPO/$ARCH"/pcal-"$VERSION"-r*.apk 2>/dev/null | tail -1)
@@ -76,7 +77,7 @@ chmod +x "$WORK/aports/scripts/genapkovl-pcal.sh"
 PCAL_PUBKEYS=$(ls "$HOME"/.abuild/*.rsa.pub)
 export PCAL_PUBKEYS
 
-rm -rf "$WORK/tmp"  # leftovers from an earlier (failed) build
+rm -rf "$WORK/tmp" "$WORK/scratch"  # leftovers from an earlier (failed) build
 FREE_MB=$(df -Pk "$WORK" | awk 'NR == 2 { print int($4 / 1024) }')
 if [ "$FREE_MB" -lt "$NEED_MB" ]; then
     hint="make the VM's disk bigger (see iso/README.md)"
@@ -85,10 +86,13 @@ if [ "$FREE_MB" -lt "$NEED_MB" ]; then
 fi
 
 echo "building the $NAME $VERSION ISO for $ARCH on Alpine $REL ($FREE_MB MB free; this takes a few minutes)"
-mkdir -p "$WORK/tmp"
+mkdir -p "$WORK/tmp" "$WORK/scratch"
 touch "$WORK/started"
 (
     cd "$WORK/aports/scripts"
+    # The kernel step unpacks all firmware into $TMPDIR (default /tmp, which can be a
+    # small RAM disk). Keep it on the disk next to the other work files instead.
+    export TMPDIR="$WORK/scratch"
     sh mkimage.sh \
         --tag "$VERSION" \
         --arch "$ARCH" \
@@ -100,10 +104,10 @@ touch "$WORK/started"
         --repository "$MIRROR/$REL/community" \
         --repository "$REPO"
 ) || {
-    rm -rf "$WORK/tmp"
+    rm -rf "$WORK/tmp" "$WORK/scratch"
     die "mkimage failed (see the messages above)"
 }
-rm -rf "$WORK/tmp"  # the unpacked build files take gigabytes
+rm -rf "$WORK/tmp" "$WORK/scratch"  # the unpacked build files take gigabytes
 
 ISO=$(find "$OUT" -maxdepth 1 -name '*.iso' -newer "$WORK/started" | head -1)
 [ -n "$ISO" ] || die "mkimage finished but no new ISO is in $OUT"
