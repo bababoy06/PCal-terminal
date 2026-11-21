@@ -1,4 +1,4 @@
-# Maintainer: bababoy06
+# Maintainer: bababoy06 <78850952+bababoy06@users.noreply.github.com>
 # Alpine package recipe for PCal. Build it with packaging/alpine/build-apk.sh
 # (it fills in pkgver, arch and the checksum, then runs abuild).
 pkgname=pcal
