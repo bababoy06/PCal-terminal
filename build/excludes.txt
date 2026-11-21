@@ -1,0 +1,34 @@
+# Standard-library modules left out of the release build (one per line).
+# tests/smoke_test.py --block build/excludes.txt runs the source with these
+# blocked, so a module the programs do need fails the test instead of the release.
+
+# never used
+tkinter
+unittest
+pydoc
+doctest
+sqlite3
+xmlrpc
+lib2to3
+distutils
+setuptools
+pip
+ensurepip
+idlelib
+venv
+asyncio
+multiprocessing
+email.mime
+http.server
+
+# would bundle extra shared libraries (about 5 MB)
+ssl
+_ssl
+_hashlib
+bz2
+_bz2
+lzma
+_lzma
+decimal
+_decimal
+_pydecimal

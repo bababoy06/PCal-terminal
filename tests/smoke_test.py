@@ -8,6 +8,9 @@ Works for the source and for a built binary:
   python3 tests/smoke_test.py python3 retromenu/pontes.py
   python3 tests/smoke_test.py dist/onedir/pontes/pontes
   python3 tests/smoke_test.py dist/release/pontes-linux-x86_64-musl
+
+  --block build/excludes.txt   (Python source only) make importing the modules the
+                               release build leaves out fail, to prove they aren't needed
 """
 import os
 import pty
@@ -24,13 +27,42 @@ try:
 except ImportError:  # not a Unix system
     sys.exit("needs Linux")
 
-UP, ENTER, ESC = "\x1bOA", "\r", "\x1b"
+UP, DOWN, END, ENTER, ESC = "\x1bOA", "\x1bOB", "\x1bOF", "\r", "\x1b"
+
+
+BLOCKER = """
+import sys
+BLOCKED = {BLOCKED!r}
+class _Blocker:
+    def find_spec(self, name, path=None, target=None):
+        if name in BLOCKED or any(name.startswith(b + ".") for b in BLOCKED):
+            raise ModuleNotFoundError("smoke test: " + name + " is left out of the release build")
+sys.meta_path.insert(0, _Blocker())
+"""
+EXTRA_ENV = {}
+
+
+def block_modules(listfile, home):
+    """Make the Python source behave like the release build: excluded modules can't be imported."""
+    names = []
+    with open(listfile) as f:
+        for line in f:
+            line = line.split("#")[0].strip()
+            if line:
+                names.append(line)
+    d = os.path.join(home, ".blocker")
+    os.makedirs(d)
+    with open(os.path.join(d, "sitecustomize.py"), "w") as f:
+        f.write(BLOCKER.replace("{BLOCKED!r}", repr(set(names))))
+    EXTRA_ENV["PYTHONPATH"] = d
+    return names
 
 
 class Session:
     def __init__(self, cmd, home):
         env = dict(os.environ, HOME=home, XDG_CONFIG_HOME=os.path.join(home, ".config"),
                    TERM="xterm-256color", LANG="C.UTF-8", LC_ALL="C.UTF-8", SHELL="/bin/sh")
+        env.update(EXTRA_ENV)
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             os.chdir(home)
@@ -82,7 +114,13 @@ class Session:
 
 def main():
     # make file arguments absolute: the test runs the program from a temporary home folder
-    base = [os.path.abspath(a) if os.path.exists(a) else a for a in sys.argv[1:]]
+    args = sys.argv[1:]
+    blockfile = None
+    if "--block" in args:
+        i = args.index("--block")
+        blockfile = os.path.abspath(args[i + 1])
+        del args[i:i + 2]
+    base = [os.path.abspath(a) if os.path.exists(a) else a for a in args]
     if not base:
         sys.exit(__doc__)
     results = []
@@ -93,6 +131,10 @@ def main():
 
     home = tempfile.mkdtemp(prefix="pontes-smoke-")
     os.makedirs(os.path.join(home, "docs"))
+    with open(os.path.join(home, "docs", "notes.txt"), "w") as f:
+        f.write("hello\n")
+    if blockfile:
+        print(f"blocking {len(block_modules(blockfile, home))} modules left out of the release build")
     try:
         # --- version
         s = Session(base + ["--version"], home)
@@ -111,12 +153,21 @@ def main():
         s.send(ENTER, 0.8)  # Files is the first item
         check("menu: file manager opens", s.expect("FILES ::"))
         check("menu: lists the home folder", s.expect("docs/"))
+        s.send(ENTER, 0.6)  # actions for docs/: Open folder, Open terminal here, Details ...
+        s.send(DOWN + DOWN, 0.4)
+        s.send(ENTER, 1.0)
+        check("menu: file details open", s.expect("DETAILS") and s.expect("PERMS"))
+        s.send(ENTER, 0.5)
         s.send("q", 0.6)
+        s.send(UP + UP + UP + UP, 0.5)  # up from Files wraps: Log out, Shut down, Reboot, Settings
+        s.send(ENTER, 0.8)
+        check("menu: settings open", s.expect("SETTINGS"))
+        s.send(ESC, 0.6)
         s.send("i")
         s.send("echo SMOKE-$((6*7))" + ENTER, 1.5)
         check("menu: command line runs a command", s.expect("SMOKE-42"))
         s.send(ESC, 0.5)
-        s.send(UP, 0.4)  # wraps to the last item: Log out
+        s.send(END, 0.4)  # last item: Log out
         s.send(ENTER, 0.5)
         check("menu: Log out exits cleanly", s.exited() == 0)
         s.kill()

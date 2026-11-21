@@ -28,10 +28,9 @@ if ldd --version 2>&1 | grep -qi musl; then LIBC=musl; else LIBC=glibc; fi
 TARGET="linux-$ARCH-$LIBC"
 echo "building pontes-calos $VERSION for $TARGET"
 
-# Leave out big parts of the standard library the programs never use.
+# Leave out the parts of the standard library the programs never use (build/excludes.txt).
 EXCLUDES=""
-for m in tkinter unittest pydoc doctest sqlite3 xmlrpc lib2to3 distutils setuptools pip \
-    ensurepip idlelib venv asyncio multiprocessing email.mime http.server; do
+for m in $(sed 's/#.*//' build/excludes.txt); do
     EXCLUDES="$EXCLUDES --exclude-module $m"
 done
 
