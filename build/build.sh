@@ -1,5 +1,5 @@
 #!/bin/sh
-# Copyright (C) 2026 bababoy06 and Pontes-Calos contributors
+# Copyright (C) 2026 bababoy06
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Build the Pontes-Calos release programs with PyInstaller.
 #

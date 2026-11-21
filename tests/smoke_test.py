@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2026 bababoy06 and Pontes-Calos contributors
+# Copyright (C) 2026 bababoy06
 # SPDX-License-Identifier: GPL-3.0-or-later
 """
 Smoke test: start Pontes-Calos in a pseudo-terminal, press keys, check the screen.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2026 bababoy06 and Pontes-Calos contributors
+# Copyright (C) 2026 bababoy06
 # SPDX-License-Identifier: GPL-3.0-or-later
 """
 RetroMenu - the green-phosphor, arrow-key home screen of Pontes-Calos.
