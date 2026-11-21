@@ -1,0 +1,22 @@
+#!/bin/sh
+# Copyright (C) 2026 bababoy06
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# pcal-live: what runs on tty1 of the PCal live ISO (from /etc/inittab).
+#
+# On the live ISO (root filesystem in RAM) it starts the PCal menu as root,
+# so the ISO boots straight into PCal. Alpine's installer copies the live
+# system's /etc/inittab to the disk, so on an installed system this same line
+# runs again: there it does NOT start a root menu, but the normal login prompt.
+# pcal-setup then replaces it with the RetroLogin screen.
+
+root_fs=$(awk '$2 == "/" { fs = $3 } END { print fs }' /proc/mounts 2>/dev/null)
+
+if [ "${PCAL_LIVE_FORCE:-}" != 1 ] && [ "$root_fs" != tmpfs ]; then
+    exec /sbin/getty 38400 tty1  # installed system: normal login
+fi
+
+export HOME=/root USER=root LOGNAME=root SHELL=/bin/ash
+export TERM="${TERM:-linux}" LANG="${LANG:-C.UTF-8}"
+cd /root 2>/dev/null || cd /
+exec /usr/bin/retromenu

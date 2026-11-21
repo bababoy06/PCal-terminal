@@ -19,6 +19,7 @@ A lightweight, speed-optimized Linux (Alpine-based) with a retro green-CRT, arro
 - [`distro/`](distro/): installer that turns a fresh Alpine install into Pontes-Calos.
 - [`build/`](build/): turns the Python code into a self-contained program (no Python needed).
 - [`packaging/alpine/`](packaging/alpine/): turns the release build into an Alpine package (`pcal-*.apk`).
+- [`iso/`](iso/): builds the bootable PCal ISO (live menu + Install PCal).
 - [`tests/`](tests/): smoke test that drives the real program through a pseudo-terminal.
 
 ## Develop with Python, release a program
@@ -58,7 +59,7 @@ Building on your own machine: just `sh build/build.sh`. The first run sets up Py
 1. ~~RetroMenu as a standalone app~~
 2. ~~Alpine install: login screen on tty1, then RetroMenu (`distro/install.sh`)~~
 3. ~~Self-contained release program (no Python on the system)~~
-4. Custom ISO built with `mkimage`
+4. Bootable PCal ISO built with `mkimage` (live menu + Install PCal); next: one retro install screen
 5. ARM build (Raspberry Pi)
 
 ## License
