@@ -21,7 +21,26 @@ sh packaging/alpine/build-apk.sh     # 2. the pcal package
 sh iso/build-iso.sh                  # 3. the ISO
 ```
 
-Result: `dist/iso/pcal-0.6-x86_64.iso` (+ `.sha256`). It needs internet, because the Alpine packages
+Result: `dist/iso/pcal-0.6-x86_64.iso` (+ `.sha256`).
+
+### Two kinds of ISO
+
+| Command | ISO | For | Free space while building |
+|---|---|---|---|
+| `sh iso/build-iso.sh` | `pcal-0.6-x86_64.iso` | real PCs and laptops (Alpine *standard*: firmware for Wi-Fi, graphics, ...) | about **6 GB** |
+| `sh iso/build-iso.sh --virt` | `pcal-virt-0.6-x86_64.iso` | virtual machines only (Alpine *virt*: small VM kernel, no firmware) | about **1.5 GB** |
+
+For testing in VirtualBox/Hyper-V/QEMU, `--virt` is quicker and much smaller. The script checks
+the free space before it starts, and removes its multi-GB work files when done or when it fails.
+
+If your VM's disk is too small: shut the VM down, make its disk bigger in your VM program, then
+grow the partition inside Alpine (with the community repository enabled):
+
+```sh
+doas apk add cloud-utils-growpart e2fsprogs-extra
+doas growpart /dev/sda 3 && doas resize2fs /dev/sda3
+```
+ It needs internet, because the Alpine packages
 come from the Alpine mirror, and takes a few minutes. The ISO uses the same Alpine release as the VM you build on.
 
 ## What's on it
