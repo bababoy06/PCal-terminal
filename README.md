@@ -18,6 +18,7 @@ A lightweight, speed-optimized Linux (Alpine-based) with a retro green-CRT, arro
   - `pontes.py`: one program that runs both (`pontes menu`, `pontes login`), the way busybox does
 - [`distro/`](distro/): installer that turns a fresh Alpine install into Pontes-Calos.
 - [`build/`](build/): turns the Python code into a self-contained program (no Python needed).
+- [`packaging/alpine/`](packaging/alpine/): turns the release build into an Alpine package (`pcal-*.apk`).
 - [`tests/`](tests/): smoke test that drives the real program through a pseudo-terminal.
 
 ## Develop with Python, release a program
