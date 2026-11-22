@@ -46,13 +46,6 @@ FONT = {
 }
 BANNER = ["".join(FONT[c][row] for c in SYSTEM_NAME) for row in range(4)]
 
-# The big title in block letters (Unicode screens); render_banner() is the ASCII fallback.
-BLOCK_BANNER = [
-    "██▀▀▀▀▀██   ██▀▀▀▀▀▀▀   ██▀▀▀▀▀██   ██       ",
-    "██▄▄▄▄▄██   ██          ██▄▄▄▄▄██   ██       ",
-    "██          ██          ██     ██   ██       ",
-    "▀▀          ▀▀▀▀▀▀▀▀▀   ▀▀     ▀▀   ▀▀▀▀▀▀▀▀▀",
-]
 
 THEMES = {  # 8-colour base, 256-colour (normal, bright, dim), Linux console RGB
     "green": (curses.COLOR_GREEN, (77, 120, 28), ("020a04", "33ff66", "b4ffc8", "1d6b34")),
@@ -183,7 +176,7 @@ class LoginScreen:
             self.tty = "console"
         enc = locale.nl_langinfo(locale.CODESET).upper().replace("-", "")
         u = enc == "UTF8" and box_style != "ascii"
-        self.banner = BLOCK_BANNER if u else BANNER
+        self.banner = BANNER
         # single lines on the Linux console (many console fonts lack the double-line set)
         single = box_style == "single" or (box_style != "double" and os.environ.get("TERM") == "linux")
         if not u:

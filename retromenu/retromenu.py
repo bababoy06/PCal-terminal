@@ -35,7 +35,7 @@ import time
 VERSION = "0.6"
 SYSTEM_NAME = "PCAL"
 SHORT_NAME = "PCal"
-TAGLINE = f"PONTES-CALOS SYSTEM  //  V{VERSION}"
+TAGLINE = f"PONTES-CALOS SYSTEM V{VERSION}"
 COPYRIGHT = "(C) PONTES-CALOS DATA SYSTEMS"
 
 CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "retromenu")
@@ -109,13 +109,6 @@ def render_banner(text):
 
 BANNER = render_banner(SYSTEM_NAME)
 
-# The big title in block letters (Unicode screens); render_banner() is the ASCII fallback.
-BLOCK_BANNER = [
-    "██▀▀▀▀▀██   ██▀▀▀▀▀▀▀   ██▀▀▀▀▀██   ██       ",
-    "██▄▄▄▄▄██   ██          ██▄▄▄▄▄██   ██       ",
-    "██          ██          ██     ██   ██       ",
-    "▀▀          ▀▀▀▀▀▀▀▀▀   ▀▀     ▀▀   ▀▀▀▀▀▀▀▀▀",
-]
 
 UNICODE_CHARS = dict(tl="╔", tr="╗", bl="╚", br="╝", h="═", v="║", lt="╠", rt="╣",
                      tt="╦", bt="╩", x="╬", ptr="►", sub="»", up="▲", down="▼",
@@ -529,8 +522,8 @@ class App:
         self.history, self.hist_i, self.hist_saved = self.load_history(), None, ""
 
     def banner(self):
-        """The title: block letters where the screen can show them, else ASCII art."""
-        return BANNER if self.box_chars() is ASCII_CHARS else BLOCK_BANNER
+        """The title in line-art letters."""
+        return BANNER
 
     def box_chars(self):
         style = self.cfg.get("box_style", "auto")
