@@ -72,6 +72,7 @@ DEFAULT_CONFIG = {
     "effects": "subtle",  # off | subtle | full
     "console_palette": True,
     "box_style": "auto",  # auto: single lines on the Linux console, double elsewhere
+    "status_panel": False,  # SYSTEM STATUS next to the main menu (shortcut: s)
     "reboot_cmd": "reboot",
     "poweroff_cmd": "poweroff",
 }
@@ -110,14 +111,14 @@ BANNER = render_banner(SYSTEM_NAME)
 
 UNICODE_CHARS = dict(tl="╔", tr="╗", bl="╚", br="╝", h="═", v="║", lt="╠", rt="╣",
                      tt="╦", bt="╩", x="╬", ptr="►", sub="»", up="▲", down="▼",
-                     block="█", shade="░")
+                     block="█", shade="░", bar_on="■", bar_off="·")
 # Single lines: in practically every console font (many lack the double-line set)
 SINGLE_CHARS = dict(UNICODE_CHARS, tl="┌", tr="┐", bl="└", br="┘", h="─", v="│", lt="├", rt="┤",
                     tt="┬", bt="┴", x="┼")
 BOX_STYLES = ("auto", "double", "single", "ascii")
 ASCII_CHARS = dict(tl="+", tr="+", bl="+", br="+", h="=", v="|", lt="+", rt="+",
                    tt="+", bt="+", x="+", ptr=">", sub=">>", up="^", down="v",
-                   block="#", shade=".")
+                   block="#", shade=".", bar_on="#", bar_off=".")
 
 K_UP = (curses.KEY_UP, ord("k"))
 K_DOWN = (curses.KEY_DOWN, ord("j"))
@@ -214,6 +215,168 @@ def sysinfo():
     except (OSError, ValueError, IndexError):
         pass
     return "  ".join(parts)
+
+
+class SystemStatus:
+    """Live readouts for the home screen's SYSTEM STATUS panel.
+    Only /proc, /sys and a couple of system calls: no programs are started."""
+
+    def __init__(self):
+        self.cpu_prev = None  # (busy, total) from the last /proc/stat read
+        self.cpu_pct = None
+
+    @staticmethod
+    def bar(frac, width, B):
+        filled = max(0, min(width, round(frac * width)))
+        return B["bar_on"] * filled + B["bar_off"] * (width - filled)
+
+    def cpu(self):
+        try:
+            with open("/proc/stat") as f:
+                vals = [int(v) for v in f.readline().split()[1:]]
+        except (OSError, ValueError):
+            return None
+        idle = vals[3] + (vals[4] if len(vals) > 4 else 0)
+        total = sum(vals[:8])
+        if self.cpu_prev and total > self.cpu_prev[1]:
+            busy = (total - idle) - self.cpu_prev[0]
+            self.cpu_pct = max(0.0, min(1.0, busy / (total - self.cpu_prev[1])))
+        self.cpu_prev = (total - idle, total)
+        return self.cpu_pct
+
+    @staticmethod
+    def memory():
+        mem = {}
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    k, v = line.split(":", 1)
+                    mem[k] = int(v.split()[0]) * 1024
+        except (OSError, ValueError):
+            return None
+        total = mem.get("MemTotal", 0)
+        used = total - mem.get("MemAvailable", mem.get("MemFree", 0))
+        return (used, total) if total else None
+
+    @staticmethod
+    def disk(path="/"):
+        try:
+            st = os.statvfs(path)
+        except OSError:
+            return None
+        total = st.f_blocks * st.f_frsize
+        used = total - st.f_bfree * st.f_frsize
+        return (used, total) if total else None
+
+    @staticmethod
+    def network():
+        """'eth0 192.168.10.104' for the first interface that has an IPv4 address."""
+        import fcntl
+        import struct
+        try:
+            names = sorted(n for n in os.listdir("/sys/class/net") if n != "lo")
+        except OSError:
+            return "unknown"
+        found = []
+        for name in names:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sk:
+                    raw = fcntl.ioctl(sk.fileno(), 0x8915, struct.pack("256s", name[:15].encode()))  # SIOCGIFADDR
+                found.append(f"{name} {socket.inet_ntoa(raw[20:24])}")
+            except OSError:
+                continue
+        if not found:
+            return "offline"
+        return found[0] + (f"  +{len(found) - 1}" if len(found) > 1 else "")
+
+    @staticmethod
+    def uptime():
+        try:
+            with open("/proc/uptime") as f:
+                secs = int(float(f.read().split()[0]))
+        except (OSError, ValueError, IndexError):
+            return "?"
+        d, secs = divmod(secs, 86400)
+        h, secs = divmod(secs, 3600)
+        return (f"{d}d " if d else "") + f"{h}h{secs // 60:02d}m"
+
+    @staticmethod
+    def first_file(pattern_dir, suffix):
+        try:
+            for name in sorted(os.listdir(pattern_dir)):
+                path = os.path.join(pattern_dir, name, suffix)
+                if os.path.exists(path):
+                    return path
+        except OSError:
+            pass
+        return None
+
+    def battery(self, bar_w, B):
+        base = "/sys/class/power_supply"
+        try:
+            bats = sorted(n for n in os.listdir(base) if n.startswith("BAT"))
+        except OSError:
+            return None
+        if not bats:
+            return None
+        try:
+            with open(os.path.join(base, bats[0], "capacity")) as f:
+                pct = int(f.read().strip())
+            with open(os.path.join(base, bats[0], "status")) as f:
+                state = f.read().strip().upper()
+        except (OSError, ValueError):
+            return None
+        return f"{self.bar(pct / 100, bar_w, B)} {pct:3d}%  {state}"
+
+    def temperature(self, B):
+        path = self.first_file("/sys/class/thermal", "temp")
+        if not path:
+            return None
+        try:
+            with open(path) as f:
+                c = int(f.read().strip()) / 1000
+        except (OSError, ValueError):
+            return None
+        return f"{c:.0f}{'°' if B['block'] == '█' else ' '}C"
+
+    def rows(self, user, host, bar_w, B):
+        def usage(pair):
+            if not pair:
+                return "?"
+            used, total = pair
+            return f"{self.bar(used / total, bar_w, B)} {used * 100 // total:3d}%  {human_size(used)}/{human_size(total)}"
+
+        cpu = self.cpu()
+        try:
+            with open("/proc/loadavg") as f:
+                load = "  ".join(f.read().split()[:3])
+        except OSError:
+            load = "?"
+        try:
+            procs = str(sum(1 for d in os.listdir("/proc") if d.isdigit()))
+        except OSError:
+            procs = "?"
+        rows = [
+            ("USER", f"{user}@{host}"),
+            ("DATE", time.strftime("%a %d %b %Y").upper()),
+            ("TIME", time.strftime("%H:%M:%S")),
+            ("UPTIME", self.uptime()),
+            ("KERNEL", os.uname().release),
+            ("", ""),
+            ("CPU", f"{self.bar(cpu, bar_w, B)} {round(cpu * 100):3d}%" if cpu is not None else "measuring..."),
+            ("MEMORY", usage(self.memory())),
+            ("DISK /", usage(self.disk("/"))),
+            ("LOAD", load),
+            ("PROCESSES", procs),
+            ("NETWORK", self.network()),
+        ]
+        bat = self.battery(bar_w, B)
+        if bat:
+            rows.append(("BATTERY", bat))
+        temp = self.temperature(B)
+        if temp:
+            rows.append(("TEMP", temp))
+        return rows
 
 
 def load_config():
@@ -350,6 +513,7 @@ class App:
         self.apply_theme()
         self.files = FileManager(self)
         self.glow = {}  # table key -> (selected row, previous row, time of the change)
+        self.status_panel = SystemStatus()
         self.powered = False  # has the power-on animation run yet?
         # command line state (kept while you move around the menus)
         self.con_cwd = os.path.expanduser("~")
@@ -799,15 +963,34 @@ class App:
                 nonlocal top
                 H, W = self.scr.getmaxyx()
                 self.scr.erase()
-                y = self.draw_header(H, W)
                 over = self.table_overhead(title, headers)
                 c1 = max(len(l) for l in labels) + 6
                 c2 = max([len(i.get("desc", "")) for i in items] + [len(headers[1])]) + 3
                 tw = min(W, max(c1 + c2 + 3, len(title) + 6, 44))
                 c1 = min(c1, max(10, tw // 2))
+                # Wide screens: the home screen gets a SYSTEM STATUS panel next to the menu
+                fits = root and W >= tw + 2 + 48 and H >= 22
+                geo["panel_fits"] = fits
+                wide = fits and self.cfg.get("status_panel")
+                y = self.draw_header(H, W, info=not wide)
                 spare = H - y - (4 if root else 3)  # room for the command line and status bar
-                th = max(over + 1, min(spare, n + over))
-                tx = max(0, (W - tw) // 2)
+                if wide:
+                    pw = max(48, min(66, W - tw - 6))
+                    total = tw + 2 + pw
+                    tx = max(0, (W - total) // 2)
+                    px = tx + tw + 2
+                    bar_w = max(6, min(20, pw - 2 - 12 - 22))
+                    srows = self.status_panel.rows(self.user, self.host, bar_w, self.B)
+                    sover = self.table_overhead("SYSTEM STATUS", None)
+                    th = max(over + 1, min(spare, max(n + over, len(srows) + sover)))
+                    self.draw_table(self.scr, y, px, th, pw, len(srows),
+                                    lambda i: (srows[i], self.bold if srows[i][0] in ("TIME",) else None),
+                                    title="SYSTEM STATUS", widths=(11,), pointer=False)
+                    cx, cw = tx, total
+                else:
+                    th = max(over + 1, min(spare, n + over))
+                    tx = max(0, (W - tw) // 2)
+                    cx, cw = tx, tw
                 body = th - over
                 _, top = clamp_scroll(sel, top, body, n)
                 self.draw_table(self.scr, y, tx, th, tw, n, row_at, -1 if focus else sel, top,
@@ -815,13 +998,15 @@ class App:
                 keep_footer = H >= 20 and not (root and self.con_out)
                 geo["console"] = root and y + th + 1 < H - 2
                 if geo["console"]:
-                    self.con_rows = self.draw_console(y + th + 1, tx, tw, H, focus, keep_footer)
+                    self.con_rows = self.draw_console(y + th + 1, cx, cw, H, focus, keep_footer)
                 if keep_footer:
                     put(self.scr, H - 2, max(0, (W - len(COPYRIGHT)) // 2), COPYRIGHT, self.dim)
                 if focus:
                     hints = "-- INSERT --  ENTER run  !cmd full terminal  UP/DN history  ESC menu"
                 elif root:
                     hints = "UP/DN move  RIGHT/ENTER select  i command line  t terminal"
+                    if fits:
+                        hints += "  s status " + ("off" if wide else "on")
                 else:
                     hints = "UP/DN move  RIGHT/ENTER select  LEFT back"
                 self.status(H, W, hints)
@@ -852,6 +1037,9 @@ class App:
                 continue
             if root and k == "t":  # t = full terminal, in the command line's folder
                 self.open_terminal(self.con_cwd)
+                continue
+            if root and k == "s" and geo.get("panel_fits"):  # s = show / hide SYSTEM STATUS
+                self.set("status_panel", not self.cfg.get("status_panel"))
                 continue
             if isinstance(k, str):
                 k = ord(k)  # vim keys (h j k l q) in the other screens
@@ -1185,6 +1373,8 @@ class App:
                 item("Hidden files", lambda: self.set("show_hidden", not c["show_hidden"]),
                      desc=onoff(c["show_hidden"])),
                 item("Boot splash", lambda: self.set("splash", not c["splash"]), desc=onoff(c["splash"])),
+                item("Status panel", lambda: self.set("status_panel", not c.get("status_panel")),
+                     desc=onoff(c.get("status_panel")) + "  (next to the main menu; shortcut: s)"),
                 item("Box style", desc=c.get("box_style", "auto").upper() + "  (lines of menus and boxes)",
                      sub=lambda: [item(v.upper(), lambda v=v: self.set("box_style", v)) for v in BOX_STYLES]),
                 item("Effects", desc=self.fx.upper() + "  (CRT power on/off, afterglow)",
