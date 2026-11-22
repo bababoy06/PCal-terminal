@@ -523,6 +523,11 @@ def plan(a):
         f"[ -n \"$part\" ] || {{ echo 'no ext4 root partition found on {disk}'; exit 1; }} && "
         f"mkdir -p {TARGET} && mount \"$part\" {TARGET} && "
         f"mount --bind /dev {TARGET}/dev && mount --bind /proc {TARGET}/proc && mount --bind /sys {TARGET}/sys && "
+        # setup-disk copies the settings in /etc (so the account exists) but not /home:
+        # give the user a home folder on the new system, the way adduser makes one
+        f"chroot {TARGET} sh -c '[ -d /home/{user} ] || {{ mkdir -p /home/{user} && "
+        f"cp -a /etc/skel/. /home/{user}/ 2>/dev/null; chown -R {user}:{user} /home/{user} && "
+        f"chmod 700 /home/{user}; }}' && "
         f"chroot {TARGET} pcal-setup {user}; rc=$?; "
         f"umount {TARGET}/sys {TARGET}/proc {TARGET}/dev {TARGET}; exit $rc"
     )
