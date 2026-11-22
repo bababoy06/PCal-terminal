@@ -72,6 +72,7 @@ DEFAULT_CONFIG = {
     "effects": "subtle",  # off | subtle | full
     "console_palette": True,
     "box_style": "auto",  # auto: single lines on the Linux console, double elsewhere
+    "status_panel": False,  # SYSTEM STATUS next to the main menu (shortcut: s)
     "reboot_cmd": "reboot",
     "poweroff_cmd": "poweroff",
 }
@@ -968,7 +969,9 @@ class App:
                 tw = min(W, max(c1 + c2 + 3, len(title) + 6, 44))
                 c1 = min(c1, max(10, tw // 2))
                 # Wide screens: the home screen gets a SYSTEM STATUS panel next to the menu
-                wide = root and W >= tw + 2 + 48 and H >= 22
+                fits = root and W >= tw + 2 + 48 and H >= 22
+                geo["panel_fits"] = fits
+                wide = fits and self.cfg.get("status_panel")
                 y = self.draw_header(H, W, info=not wide)
                 spare = H - y - (4 if root else 3)  # room for the command line and status bar
                 if wide:
@@ -1002,6 +1005,8 @@ class App:
                     hints = "-- INSERT --  ENTER run  !cmd full terminal  UP/DN history  ESC menu"
                 elif root:
                     hints = "UP/DN move  RIGHT/ENTER select  i command line  t terminal"
+                    if fits:
+                        hints += "  s status " + ("off" if wide else "on")
                 else:
                     hints = "UP/DN move  RIGHT/ENTER select  LEFT back"
                 self.status(H, W, hints)
@@ -1032,6 +1037,9 @@ class App:
                 continue
             if root and k == "t":  # t = full terminal, in the command line's folder
                 self.open_terminal(self.con_cwd)
+                continue
+            if root and k == "s" and geo.get("panel_fits"):  # s = show / hide SYSTEM STATUS
+                self.set("status_panel", not self.cfg.get("status_panel"))
                 continue
             if isinstance(k, str):
                 k = ord(k)  # vim keys (h j k l q) in the other screens
@@ -1365,6 +1373,8 @@ class App:
                 item("Hidden files", lambda: self.set("show_hidden", not c["show_hidden"]),
                      desc=onoff(c["show_hidden"])),
                 item("Boot splash", lambda: self.set("splash", not c["splash"]), desc=onoff(c["splash"])),
+                item("Status panel", lambda: self.set("status_panel", not c.get("status_panel")),
+                     desc=onoff(c.get("status_panel")) + "  (next to the main menu; shortcut: s)"),
                 item("Box style", desc=c.get("box_style", "auto").upper() + "  (lines of menus and boxes)",
                      sub=lambda: [item(v.upper(), lambda v=v: self.set("box_style", v)) for v in BOX_STYLES]),
                 item("Effects", desc=self.fx.upper() + "  (CRT power on/off, afterglow)",
