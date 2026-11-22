@@ -10,6 +10,14 @@
 # runs again: there it does NOT start a root menu, but the normal login prompt.
 # pcal-setup then replaces it with the RetroLogin screen.
 
+# Only init (on tty1, from /etc/inittab) should start this. Run by hand from a shell,
+# getty can't take over the terminal ("setsid: Operation not permitted"), so explain instead.
+if [ "$PPID" != 1 ] && [ "${PCAL_LIVE_FORCE:-}" != 1 ]; then
+    echo "pcal-live is started by the system on tty1 (see /etc/inittab); there's nothing to run by hand."
+    echo "To set up the PCal login screen and menu on an installed system, run (as root): pcal-setup"
+    exit 0
+fi
+
 root_fs=$(awk '$2 == "/" { fs = $3 } END { print fs }' /proc/mounts 2>/dev/null)
 
 if [ "${PCAL_LIVE_FORCE:-}" != 1 ] && [ "$root_fs" != tmpfs ]; then
