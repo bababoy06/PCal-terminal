@@ -88,3 +88,21 @@ Start the menu on tty1 only. Add this to `~/.profile`:
 
 Other ttys (Ctrl+Alt+F2) still give a normal login, which is your safety net.
 For a nicer console font: `apk add terminus-font` then `setfont ter-v18n`.
+
+## Graphical screen (in progress)
+
+The building blocks for a graphical PCal screen: the same programs, drawn as an old monitor
+with phosphor glow, scanlines and a curved tube. Not switched on anywhere yet.
+
+- `vt.py`: a small terminal emulator (xterm-256color subset) that turns program output into cells.
+- `psf.py`: reads Linux console fonts (Terminus); box lines, blocks and arrows are drawn by code.
+- `crt.py`: renders cells as a CRT picture, including the power on/off effect. Needs numpy.
+
+Try it on Alpine (`apk add py3-numpy font-terminus`), no display needed:
+
+```sh
+python3 retromenu/crt.py -o menu.png -- python3 retromenu/retromenu.py
+python3 retromenu/crt.py -o amber.png --theme amber --size 1920x1080 --font-size 32 -- top
+python3 retromenu/crt.py -o on.png --power on -- python3 retromenu/retromenu.py   # on-00.png ... on-11.png
+python3 tests/crt_test.py --menu
+```
