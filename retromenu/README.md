@@ -91,18 +91,30 @@ For a nicer console font: `apk add terminus-font` then `setfont ter-v18n`.
 
 ## Graphical screen (in progress)
 
-The building blocks for a graphical PCal screen: the same programs, drawn as an old monitor
-with phosphor glow, scanlines and a curved tube. Not switched on anywhere yet.
+`pontes screen` shows the menu (or any program) as an old CRT monitor, drawn straight onto
+the display through the framebuffer: phosphor glow, scanlines, a curved tube, afterglow and the
+power on/off effect. No X or Wayland. Not started automatically yet.
 
+- `screen.py`: the live screen: runs the program in a pseudo-terminal, passes your keys on,
+  draws only what changed, and gives the console back when you switch away (Alt+F1..F6).
+  Without numpy, a font or a framebuffer it just runs the program in text mode.
 - `vt.py`: a small terminal emulator (xterm-256color subset) that turns program output into cells.
 - `psf.py`: reads Linux console fonts (Terminus); box lines, blocks and arrows are drawn by code.
-- `crt.py`: renders cells as a CRT picture, including the power on/off effect. Needs numpy.
+- `crt.py`: renders cells as a CRT picture, redrawing only the rows that changed. Needs numpy.
 
-Try it on Alpine (`apk add py3-numpy font-terminus`), no display needed:
+Try it on Alpine, on the VM's own screen (a console such as tty2, not over SSH):
 
 ```sh
-python3 retromenu/crt.py -o menu.png -- python3 retromenu/retromenu.py
-python3 retromenu/crt.py -o amber.png --theme amber --size 1920x1080 --font-size 32 -- top
-python3 retromenu/crt.py -o on.png --power on -- python3 retromenu/retromenu.py   # on-00.png ... on-11.png
+doas apk add py3-numpy font-terminus
+doas addgroup $USER video                 # access to /dev/fb0; log out and in again
+python3 retromenu/pontes.py screen        # leave the menu (Log out) to come back
+python3 retromenu/pontes.py screen --theme amber --effects full -- htop
+python3 retromenu/pontes.py screen --bench   # drawing speed, no display needed
+```
+
+Without a display, `crt.py` saves pictures instead:
+
+```sh
+python3 retromenu/crt.py -o menu.png --size 1920x1080 --font-size 32 -- python3 retromenu/retromenu.py
 python3 tests/crt_test.py --menu
 ```
