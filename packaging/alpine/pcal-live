@@ -7,8 +7,13 @@
 # On the live ISO (root filesystem in RAM) it starts the PCal menu as root,
 # so the ISO boots straight into PCal. Alpine's installer copies the live
 # system's /etc/inittab to the disk, so on an installed system this same line
-# runs again: there it does NOT start a root menu, but the normal login prompt.
-# pcal-setup then replaces it with the RetroLogin screen.
+# runs again. There it never starts a root menu. Instead:
+#   - first start after the PCal installer: it finds /etc/pcal/firstboot (left
+#     by the installer), runs pcal-setup for that user, and shows RetroLogin;
+#   - once pcal-setup has pointed tty1 elsewhere: it starts that (RetroLogin);
+#   - otherwise: the normal login prompt, with a hint to run pcal-setup.
+FIRSTBOOT=/etc/pcal/firstboot
+INITTAB=/etc/inittab
 
 # Only init (on tty1, from /etc/inittab) should start this. Run by hand from a shell,
 # getty can't take over the terminal ("setsid: Operation not permitted"), so explain instead.
@@ -21,7 +26,27 @@ fi
 root_fs=$(awk '$2 == "/" { fs = $3 } END { print fs }' /proc/mounts 2>/dev/null)
 
 if [ "${PCAL_LIVE_FORCE:-}" != 1 ] && [ "$root_fs" != tmpfs ]; then
-    # installed system, but pcal-setup hasn't run yet (it replaces this tty1 line)
+    # ---- installed system
+    if [ -f "$FIRSTBOOT" ]; then
+        user=$(head -n1 "$FIRSTBOOT")
+        printf '\n  \033[1;32mPCAL -- FIRST START\033[0m  finishing the setup for %s ...\n\n' "$user"
+        if /usr/sbin/pcal-setup "$user"; then
+            rm -f "$FIRSTBOOT"
+            sleep 2
+        else
+            printf '\n  pcal-setup did not finish. Log in as root (Alt+F2) and run:  pcal-setup %s\n\n' "$user"
+            sleep 5
+        fi
+    fi
+    # pcal-setup points tty1 at RetroLogin; init may still run this old line until the
+    # next boot, so start whatever tty1 should run now
+    tty1=$(sed -n 's/^tty1::respawn://p' "$INITTAB" 2>/dev/null | head -n1)
+    case "$tty1" in
+        "" | */pcal-live*) ;;
+        # shellcheck disable=SC2086
+        *) exec $tty1 ;;
+    esac
+    # pcal-setup hasn't run yet
     printf '\n  \033[1;32mPCal is installed.\033[0m To switch on the PCal login screen and menu,\n'
     printf '  log in as \033[1mroot\033[0m and run:  \033[1;32mpcal-setup\033[0m   (then reboot)\n\n'
     exec /sbin/getty 38400 tty1  # normal login

@@ -101,6 +101,14 @@ HOME_DIR=$(awk -F: -v u="$TARGET" '$1 == u { print $6 }' "$ROOT/etc/passwd")
 [ -n "$HOME_DIR" ] || die "user '$TARGET' does not exist"
 [ "$TARGET" != root ] || warn "using root for the menu works, but a normal user is safer"
 PROFILE="$ROOT$HOME_DIR/.profile"
+if [ "$UNINSTALL" = 0 ] && [ ! -d "$ROOT$HOME_DIR" ]; then
+    # e.g. right after Alpine's setup-disk, which copies /etc but not /home: make it like adduser does
+    mkdir -p "$ROOT$HOME_DIR"
+    cp -a "$ROOT"/etc/skel/. "$ROOT$HOME_DIR"/ 2>/dev/null || true
+    chown -R "$TARGET:" "$ROOT$HOME_DIR" 2>/dev/null || true
+    chmod 700 "$ROOT$HOME_DIR"
+    say "created the home folder $HOME_DIR"
+fi
 
 remove_profile_block() {
     [ -f "$PROFILE" ] && sed -i "/$MARK_BEGIN/,/$MARK_END/d" "$PROFILE"
