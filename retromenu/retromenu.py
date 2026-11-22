@@ -1275,7 +1275,8 @@ class App:
     # ---- main menu
     def main_items(self):
         c = self.cfg
-        items = [
+        items = [item("Desk", lambda: self.tell_screen("desk"), desc="The command deck")] if IN_SCREEN else []
+        items += [
             item("Files", self.files.run, desc="Browse and manage files"),
             item("Terminal", lambda: self.open_terminal(os.path.expanduser("~")),
                  desc="Open the full command line"),
@@ -1880,8 +1881,18 @@ class FileManager:
 # ------------------------------------------------------------------------ main
 def main(scr):
     app = App(scr)
+    mode = MODE[0]
+    if mode == "files":  # just the file manager (a Desk module)
+        app.files.run()
+        return
+    if mode == "settings":  # just Settings (a Desk module)
+        app.settings()
+        return
     app.splash()
     app.menu_screen("MAIN MENU", app.main_items, root=True)
+
+
+MODE = ["menu"]
 
 
 def entry():
@@ -1889,6 +1900,13 @@ def entry():
     if len(sys.argv) > 1 and sys.argv[1] in ("-V", "--version"):
         print(f"retromenu {VERSION}")
         return 0
+    if len(sys.argv) > 1 and sys.argv[1] in ("--files", "--settings"):
+        MODE[0] = sys.argv[1][2:]
+        if MODE[0] == "files" and len(sys.argv) > 2:
+            try:
+                os.chdir(sys.argv[2])
+            except OSError:
+                pass
     os.environ.setdefault("ESCDELAY", "25")  # ESC feels instant instead of a 1s delay
     locale.setlocale(locale.LC_ALL, "")
     try:
