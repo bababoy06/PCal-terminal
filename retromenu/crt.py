@@ -14,6 +14,7 @@ Try it without any display: run a program in a pseudo-terminal and save a pictur
   python3 retromenu/crt.py -o amber.png --theme amber --size 1920x1080 --scale 2 -- htop
 """
 import argparse
+import math
 import os
 import struct
 import sys
@@ -43,11 +44,28 @@ MENU_COLOURS = {"green": (77, 120, 28), "amber": (214, 222, 130),
                 "white": (250, 231, 243), "cyan": (80, 159, 30)}
 
 EFFECT_LEVELS = {
-    #        glow  scanlines curvature vignette afterglow noise
-    "off":   (0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-    "light": (0.35, 0.25, 0.0, 0.25, 0.0, 0.0),
-    "full":  (0.55, 0.40, 0.045, 0.45, 0.45, 0.015),
+    #        glow  scanlines curvature vignette afterglow
+    "off":   (0.0, 0.0, 0.0, 0.0, 0.0),
+    "light": (0.35, 0.25, 0.0, 0.25, 0.0),
+    "full":  (0.55, 0.40, 0.045, 0.45, 0.5),
 }
+EFFECT_NAMES = ("glow", "scanlines", "curvature", "vignette", "afterglow")
+
+# Pixel layouts: (offset, bits) per colour. RGBX = bytes R, G, B, X in memory (PNG order).
+RGBX = {"bpp": 32, "r": (0, 8), "g": (8, 8), "b": (16, 8), "x": (24, 8)}
+OUTSIDE = 100.0  # canvas value marking "outside the glass": always drawn black
+
+
+def pack(r, g, b, fmt=RGBX):
+    """Pack 0-255 colour channels into pixels of the given layout (uint32 or uint16)."""
+    out = np.zeros(np.shape(r), np.uint32)
+    for v, key in ((r, "r"), (g, "g"), (b, "b")):
+        off, ln = fmt[key]
+        out |= (np.asarray(v).astype(np.uint32) >> (8 - ln)) << off
+    if "x" in fmt:
+        off, ln = fmt["x"]
+        out |= np.uint32((1 << ln) - 1) << np.uint32(off)
+    return out if fmt["bpp"] == 32 else out.astype(np.uint16)
 
 
 def _hex(s):
@@ -88,31 +106,38 @@ def best_scale(font, size, effects="full", min_cols=100, min_rows=30):
 
 class Renderer:
     """
-    Draws terminal cells as a CRT picture.
+    Draws terminal cells as a CRT picture, redrawing only the rows that changed.
 
-    font:   a psf.PSFFont        scale:  how many screen pixels per font pixel (1, 2, 3...)
-    theme:  green/amber/white/cyan, or "colour" for a colour monitor
+    font:    a psf.PSFFont         scale: screen pixels per font pixel (1, 2, 3...)
+    theme:   green/amber/white/cyan, or "colour" for a colour monitor
     effects: "off", "light", "full", or a dict with any of
-             glow, scanlines, curvature, vignette, afterglow, noise (0..1)
+             glow, scanlines, curvature, vignette, afterglow (0..1)
+    fmt:     pixel layout of .frame (RGBX for pictures; the display's own for the screen)
+
+    Use: update(grid, cursor) after the terminal changed; it returns the screen rows
+    [(top, bottom), ...] it redrew in .frame. While .animating (afterglow fading out),
+    call update() again every few hundredths of a second.
     """
 
-    def __init__(self, font, size, scale=1, theme="green", effects="full", margin=None):
+    def __init__(self, font, size, scale=1, theme="green", effects="full", margin=None, fmt=RGBX):
         self.font, self.scale = font, max(1, int(scale))
         self.out_w, self.out_h = size
+        self.fmt = fmt
         lv = EFFECT_LEVELS.get(effects, EFFECT_LEVELS["full"]) if isinstance(effects, str) else None
-        names = ("glow", "scanlines", "curvature", "vignette", "afterglow", "noise")
-        self.fx = dict(zip(names, lv)) if lv else {k: float(effects.get(k, 0)) for k in names}
+        self.fx = dict(zip(EFFECT_NAMES, lv)) if lv else {k: float(effects.get(k, 0)) for k in EFFECT_NAMES}
         self.mono = theme in PHOSPHOR
         self.theme = theme if self.mono else "colour"
         self.cw, self.ch = font.width * self.scale, font.height * self.scale
         self.cols, self.rows = self.grid(font, size, self.scale, self.fx, margin)
         self.ox = (self.out_w - self.cols * self.cw) // 2
         self.oy = (self.out_h - self.rows * self.ch) // 2
+        # rows of text around a change that get redrawn too, because the glow spills over
+        self.glow_rows = int(math.ceil(18 / font.height)) if self.fx["glow"] > 0 else 0
         self.tiles = {}
         self.rowcache = {}
-        self.prev = None
         self._build_lut()
         self._build_static()
+        self.reset()
 
     @staticmethod
     def grid(font, size, scale, effects="full", margin=None):
@@ -127,22 +152,19 @@ class Renderer:
 
     # ------------------------------------------------------------ colours
     def _build_lut(self):
-        """Intensity (0..1.5, 1024 steps) -> phosphor RGB, for the monochrome monitors."""
+        """Intensity (0..1.5 in 1024 steps) -> phosphor pixel; entries 1024+ are black."""
         if not self.mono:
             return
         glass, dim, normal, bright = (_hex(h) for h in PHOSPHOR[self.theme])
         n, b, d = (luminance(PALETTE[i]) for i in MENU_COLOURS[self.theme])
-        self.levels = {"dim": d, "normal": n, "bright": b}
         white = np.ones(3, np.float32)
         xs = [0.0, d, n, b, 1.0, 1.5]
         stops = [glass, dim, normal, bright, bright * 0.75 + white * 0.25, white]
         t = np.linspace(0, 1.5, 1024, dtype=np.float32)
-        self.lut = np.stack([np.interp(t, xs, [s[c] for s in stops]) for c in range(3)], 1)
-        lut8 = (np.clip(self.lut, 0, 1) * 255 + 0.5).astype(np.uint32)
-        # packed as 32-bit RGBX pixels: one lookup per pixel, and what displays want anyway
-        self.lut32 = (lut8[:, 0] | lut8[:, 1] << 8 | lut8[:, 2] << 16 | np.uint32(255) << 24)
-        if sys.byteorder == "big":
-            self.lut32 = self.lut32.byteswap()
+        lut = np.stack([np.interp(t, xs, [s[c] for s in stops]) for c in range(3)], 1)
+        lut8 = np.clip(lut, 0, 1) * 255 + 0.5
+        px = pack(lut8[:, 0], lut8[:, 1], lut8[:, 2], self.fmt)
+        self.lut_px = np.concatenate([px, np.zeros(1024, px.dtype)])
 
     def cell_colours(self, fg, bg, flags):
         """(foreground, background) for one cell: floats (mono) or RGB arrays (colour)."""
@@ -169,7 +191,7 @@ class Renderer:
             return np.array([(c >> 16) & 255, (c >> 8) & 255, c & 255], np.float32) / 255
         return PALETTE[c & 255]
 
-    # ------------------------------------------------------------ cells -> picture
+    # ------------------------------------------------------------ cells -> rows of pixels
     def tile(self, cell):
         t = self.tiles.get(cell)
         if t is not None:
@@ -192,35 +214,39 @@ class Renderer:
         self.tiles[cell] = t
         return t
 
-    def cells_image(self, grid, cursor=None):
-        """The terminal at font resolution: (rows*h, cols*w) intensity or (.., .., 3) RGB."""
-        rows = []
-        for y, row in enumerate(grid[: self.rows]):
-            row = tuple(row[: self.cols])
-            if cursor and cursor[1] == y:
-                cx = cursor[0]
-                if cx < len(row):
-                    ch, fg, bg, fl = row[cx]
-                    row = row[:cx] + ((ch, fg, bg, fl ^ vtmod.REV),) + row[cx + 1:]
-            img = self.rowcache.get(row)
-            if img is None:
-                img = np.concatenate([self.tile(c) for c in row], axis=1)
-                if len(self.rowcache) > 400:
-                    self.rowcache.clear()
-                self.rowcache[row] = img
-            rows.append(img)
-        img = np.concatenate(rows, axis=0)
-        need_w, need_h = self.cols * self.font.width, self.rows * self.font.height
-        if img.shape[0] < need_h or img.shape[1] < need_w:
-            pad = [(0, need_h - img.shape[0]), (0, need_w - img.shape[1])] + ([(0, 0)] if img.ndim == 3 else [])
-            img = np.pad(img, pad)
+    def row_key(self, grid, y, cursor=None):
+        row = tuple(grid[y][: self.cols]) if y < len(grid) else ()
+        if cursor and cursor[1] == y and cursor[0] < len(row):
+            cx = cursor[0]
+            ch, fg, bg, fl = row[cx]
+            row = row[:cx] + ((ch, fg, bg, fl ^ vtmod.REV),) + row[cx + 1:]
+        return row
+
+    def row_image(self, key):
+        """One row of text at font resolution."""
+        img = self.rowcache.get(key)
+        if img is None:
+            fh, w = self.font.height, self.cols * self.font.width
+            shape = (fh, w) if self.mono else (fh, w, 3)
+            if key:
+                img = np.concatenate([self.tile(c) for c in key], axis=1)
+                if img.shape[1] < w:
+                    img = np.concatenate([img, np.zeros((fh, w - img.shape[1]) + shape[2:], np.float32)], 1)
+            else:
+                img = np.zeros(shape, np.float32)
+            if len(self.rowcache) > 600:
+                self.rowcache.clear()
+            self.rowcache[key] = img
         return img
 
-    # ------------------------------------------------------------ effects
+    def cells_image(self, grid, cursor=None):
+        """The whole terminal at font resolution."""
+        return np.concatenate([self.row_image(self.row_key(grid, y, cursor)) for y in range(self.rows)], 0)
+
+    # ------------------------------------------------------------ fixed parts of the picture
     def _build_static(self):
-        """Things that only depend on the picture size: scanline pattern, tube shape."""
-        s = self.scale
-        sl = self.fx["scanlines"]
+        """Things that only depend on the picture size: scanline pattern, glass shape, remap."""
+        s, sl = self.scale, self.fx["scanlines"]
         if s >= 2:
             pat = np.ones(s, np.float32)
             pat[-1] = 1 - sl
@@ -229,33 +255,49 @@ class Renderer:
             self.scan = np.tile(pat, self.rows * self.font.height)[:, None]
         else:
             self.scan = np.where(np.arange(self.rows * self.ch) % 2, 1 - sl * 0.6, 1).astype(np.float32)[:, None]
+        if not self.mono:
+            self.scan = self.scan[..., None]
         W, H = self.out_w, self.out_h
         yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
         u = (xx + 0.5) / W * 2 - 1
         v = (yy + 0.5) / H * 2 - 1
         del xx, yy
         k = self.fx["curvature"]
-        self.remap = self.outside = None
+        self.remap = None
         if k > 0:  # barrel distortion: sample further out towards the edges
             su = u * (1 + k * v * v) * (1 + k * 0.5)
             sv = v * (1 + k * u * u) * (1 + k * 0.5)
-            # The glass: a rounded rectangle (superellipse); black bezel outside it.
-            p = 14
-            inside = ((np.abs(su) ** p + np.abs(sv) ** p) ** (1 / p) < 1).ravel()
-            self.inside = np.flatnonzero(inside)
-            self.outside = np.flatnonzero(~inside)
-            fx = np.clip((su + 1) / 2 * W - 0.5, 0, W - 1.001).ravel()[self.inside]
-            fy = np.clip((sv + 1) / 2 * H - 0.5, 0, H - 1.001).ravel()[self.inside]
+            p = 14  # the glass: a rounded rectangle (superellipse); black bezel outside it
+            inside = (np.abs(su) ** p + np.abs(sv) ** p) ** (1 / p) < 1
+            fx = np.clip((su + 1) / 2 * W - 0.5, 0, W - 1.001)
+            fy = np.clip((sv + 1) / 2 * H - 0.5, 0, H - 1.001)
+            # which canvas rows each screen row reads, to know what to redraw after a change
+            big = np.float32(1e9)
+            self.src_lo = np.where(inside, fy, big).min(axis=1).astype(np.int32)
+            self.src_hi = np.where(inside, fy, -big).max(axis=1).astype(np.int32) + 2
+            flat_inside = inside.ravel()
+            self.inside = np.flatnonzero(flat_inside)
+            self.row_start = np.searchsorted(self.inside, np.arange(H + 1) * W)
+            fx, fy = fx.ravel()[self.inside], fy.ravel()[self.inside]
             x0, y0 = fx.astype(np.int32), fy.astype(np.int32)
             self.remap = y0 * W + x0
             # bilinear sampling at scale 1, so thin strokes stay smooth instead of breaking up
             self.remap_w = (fx - x0, fy - y0) if self.scale == 1 else None
-            del su, sv, fx, fy
-        self.shade = (1 - self.fx["vignette"] * np.clip((u * u * 0.8 + v * v) * 0.55, 0, 1) ** 1.5
-                      ).astype(np.float32)
-        if not self.mono:
-            self.shade = self.shade[..., None]
+            del su, sv, fx, fy, inside
+        shade = 1 - self.fx["vignette"] * np.clip((u * u * 0.8 + v * v) * 0.55, 0, 1) ** 1.5
+        self.shade = shade.astype(np.float32) if self.mono else shade.astype(np.float32)[..., None]
 
+    def reset(self):
+        """Forget what is on screen: the next update() draws everything."""
+        chans = () if self.mono else (3,)
+        self.cbuf = np.zeros((self.out_h, self.out_w) + chans, np.float32)
+        dt = np.uint32 if self.fmt["bpp"] == 32 else np.uint16
+        self.frame = np.zeros((self.out_h, self.out_w), dt)
+        self.finish_rows(self.cbuf, 0, self.out_h, self.frame)
+        self.shown = [None] * self.rows
+        self.fades = []
+
+    # ------------------------------------------------------------ effects helpers
     @staticmethod
     def _blur(img, r):
         """Fast box blur (twice, so it looks soft) along both axes."""
@@ -269,57 +311,133 @@ class Renderer:
         return img
 
     @staticmethod
-    def _upsample(img, H, W):
-        """Bilinear resize of a small picture to H x W (first along x while it is small)."""
+    def _upsample(img, H, W, r0=0, r1=None):
+        """Bilinear resize of a small picture to H x W; only output rows r0..r1 are made."""
+        r1 = H if r1 is None else r1
         h, w = img.shape[:2]
         xs = np.clip((np.arange(W, dtype=np.float32) + 0.5) * w / W - 0.5, 0, w - 1)
         x0 = xs.astype(np.int32)
         x1 = np.minimum(x0 + 1, w - 1)
         fx = (xs - x0)[None, :, None] if img.ndim == 3 else (xs - x0)[None, :]
-        a = img[:, x0]
-        tmp = a + (img[:, x1] - a) * fx
-        ys = np.clip((np.arange(H, dtype=np.float32) + 0.5) * h / H - 0.5, 0, h - 1)
+        ys = np.clip((np.arange(r0, r1, dtype=np.float32) + 0.5) * h / H - 0.5, 0, h - 1)
         y0 = ys.astype(np.int32)
         y1 = np.minimum(y0 + 1, h - 1)
+        rows = np.arange(y0.min(), y1.max() + 1) if len(ys) else np.arange(0)
+        sub = img[rows[0]:rows[-1] + 1] if len(rows) else img[:0]
+        a = sub[:, x0]
+        tmp = a + (sub[:, x1] - a) * fx
         fy = (ys - y0)[:, None, None] if img.ndim == 3 else (ys - y0)[:, None]
-        out = tmp[y0]
-        out += (tmp[y1] - out) * fy
+        out = tmp[y0 - rows[0]]
+        out += (tmp[y1 - rows[0]] - out) * fy
         return out
 
-    def canvas(self, grid, cursor=None):
-        """Stage 1: cells -> full-size picture with glow and scanlines (no glass yet)."""
-        base = self.cells_image(grid, cursor)
-        s = self.scale
-        out = np.zeros((self.out_h, self.out_w) + base.shape[2:], np.float32)
-        h, w = base.shape[0] * s, base.shape[1] * s
-        region = out[self.oy:self.oy + h, self.ox:self.ox + w]
-        region[...] = np.repeat(np.repeat(base, s, axis=0), s, axis=1) if s > 1 else base
+    # ------------------------------------------------------------ drawing
+    def _draw_band(self, keys, a, b, now):
+        """Redraw text rows a..b into the canvas (with scanlines and glow)."""
+        s, fh, G = self.scale, self.font.height, self.glow_rows
+        c0, c1 = max(0, a - G), min(self.rows - 1, b + G)
+        base = np.concatenate([self.row_image(keys[y]) for y in range(c0, c1 + 1)], 0)
+        y0, y1 = (a - c0) * fh, (b - c0 + 1) * fh
+        part = base[y0:y1]
+        ya, yb = self.oy + a * self.ch, self.oy + (b + 1) * self.ch
+        xa, xb = self.ox, self.ox + self.cols * self.cw
+        region = self.cbuf[ya:yb, xa:xb]
+        ghost = None
+        if self.fx["afterglow"] > 0 and self.shown[a] is not None:
+            ghost = region.copy()  # what was there: it fades out instead of vanishing
+            for f in [f for f in self.fades if f[0] < yb and f[1] > ya]:
+                self.cbuf[f[0]:f[1], xa:xb] = f[2]
+                self.fades.remove(f)
+        region[...] = np.repeat(np.repeat(part, s, axis=0), s, axis=1) if s > 1 else part
         if self.fx["scanlines"] > 0:
-            region *= self.scan if region.ndim == 2 else self.scan[..., None]
+            region *= self.scan[a * self.ch:(b + 1) * self.ch]
         glow = self.fx["glow"]
         if glow > 0:
             f = 4
-            bh, bw = base.shape[0] // f * f, base.shape[1] // f * f
-            b = base[:bh, :bw]
-            rows = b[0::4] + b[1::4] + b[2::4] + b[3::4]
-            small = (rows[:, 0::4] + rows[:, 1::4] + rows[:, 2::4] + rows[:, 3::4]) * (1 / 16)
-            halo = self._upsample(self._blur(small * glow, 2), h, w)
-            region += halo
-        return out
+            bh = -(-base.shape[0] // f) * f
+            if bh != base.shape[0]:
+                base = np.concatenate([base, np.zeros((bh - base.shape[0],) + base.shape[1:], np.float32)], 0)
+            bw = base.shape[1] // f * f
+            bb = base[:, :bw]
+            rows4 = bb[0::4] + bb[1::4] + bb[2::4] + bb[3::4]
+            small = (rows4[:, 0::4] + rows4[:, 1::4] + rows4[:, 2::4] + rows4[:, 3::4]) * (glow / 16)
+            halo = self._upsample(self._blur(small, 2), bh * s, bw * s, y0 * s, y1 * s)
+            region[:, :bw * s] += halo
+        if ghost is not None and np.any(ghost > region):
+            self.fades.append([ya, yb, region.copy(), ghost, now])
+        return ya, yb
 
-    def finish(self, canvas, persist=True):
-        """Stage 2: afterglow, curved glass, vignette, colours -> (h, w, 4) uint8 RGBX picture."""
-        ag = self.fx["afterglow"]
-        if persist and ag > 0:
-            if self.prev is not None and self.prev.shape == canvas.shape:
-                np.maximum(canvas, self.prev * ag, out=canvas)
-            self.prev = canvas.copy()
+    def _tick_fades(self, now):
+        """Afterglow: old pictures fade out over a few frames."""
+        dirty, xa, xb = [], self.ox, self.ox + self.cols * self.cw
+        rate = self.fx["afterglow"]
+        for f in list(self.fades):
+            ya, yb, clean, ghost, t0 = f
+            level = rate ** ((now - t0) / 0.035) * 0.8
+            if level < 0.04:
+                self.cbuf[ya:yb, xa:xb] = clean
+                self.fades.remove(f)
+            else:
+                np.maximum(clean, ghost * level, out=self.cbuf[ya:yb, xa:xb])
+            dirty.append((ya, yb))
+        return dirty
+
+    @property
+    def animating(self):
+        return bool(self.fades)
+
+    def update(self, grid, cursor=None, now=None):
+        """Redraw what changed; returns the screen rows [(top, bottom)] updated in .frame."""
+        now = time.monotonic() if now is None else now
+        keys = [self.row_key(grid, y, cursor) for y in range(self.rows)]
+        changed = [y for y in range(self.rows) if keys[y] != self.shown[y]]
+        dirty = self._tick_fades(now) if self.fades else []
+        if changed:
+            G = self.glow_rows
+            bands = []
+            for y in changed:
+                a, b = max(0, y - G), min(self.rows - 1, y + G)
+                if bands and a <= bands[-1][1] + 1:
+                    bands[-1][1] = max(bands[-1][1], b)
+                else:
+                    bands.append([a, b])
+            for a, b in bands:
+                dirty.append(self._draw_band(keys, a, b, now))
+            self.shown = keys
+        return self.finish_dirty(dirty)
+
+    def finish_dirty(self, dirty):
+        """Turn changed canvas rows into finished screen rows in .frame."""
+        out = []
+        for ya, yb in dirty:
+            if self.remap is not None:
+                hit = np.flatnonzero((self.src_hi >= ya) & (self.src_lo < yb))
+                if not len(hit):
+                    continue
+                lo, hi = int(hit[0]), int(hit[-1]) + 1
+            else:
+                lo, hi = ya, yb
+            out.append([lo, hi])
+        out.sort()
+        merged = []
+        for lo, hi in out:
+            if merged and lo <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], hi)
+            else:
+                merged.append([lo, hi])
+        for lo, hi in merged:
+            self.finish_rows(self.cbuf, lo, hi, self.frame)
+        return [tuple(m) for m in merged]
+
+    def finish_rows(self, canvas, lo, hi, out):
+        """Curved glass, vignette and colours for screen rows lo..hi of a canvas -> out."""
+        W = self.out_w
         if self.remap is not None:
+            s0, s1 = self.row_start[lo], self.row_start[hi]
+            i = self.remap[s0:s1]
             flat = canvas.reshape(-1, *canvas.shape[2:])
-            i = self.remap
             if self.remap_w is not None:
-                W = canvas.shape[1]
-                wx, wy = self.remap_w
+                wx, wy = self.remap_w[0][s0:s1], self.remap_w[1][s0:s1]
                 if flat.ndim == 2:
                     wx, wy = wx[:, None], wy[:, None]
                 a = flat[i]
@@ -329,34 +447,51 @@ class Renderer:
                 vals = top + (bot - top) * wy
             else:
                 vals = flat[i]
-            res = np.zeros_like(flat)
-            res[self.inside] = vals
-            canvas = res.reshape(canvas.shape)
-        canvas *= self.shade
-        level = 1 - self.fx["noise"] * np.random.random() if self.fx["noise"] > 0 else 1
-        if self.mono:
-            idx = np.minimum(canvas * (1023 / 1.5 * level), 1023).astype(np.uint16)
-            px = np.take(self.lut32, idx)
+            tmp = np.full(((hi - lo) * W,) + canvas.shape[2:], OUTSIDE, np.float32)
+            tmp[self.inside[s0:s1] - lo * W] = vals
+            tmp = tmp.reshape((hi - lo, W) + canvas.shape[2:])
         else:
-            c8 = (np.clip(canvas * level, 0, 1) * 255 + 0.5).astype(np.uint32)
-            px = c8[..., 0] | c8[..., 1] << 8 | c8[..., 2] << 16 | np.uint32(255) << 24
-            if sys.byteorder == "big":
-                px = px.byteswap()
-        if self.outside is not None:
-            px.reshape(-1)[self.outside] = 0
-        return px.view(np.uint8).reshape(px.shape + (4,))
+            tmp = canvas[lo:hi].copy()
+        tmp *= self.shade[lo:hi]
+        if self.mono:
+            out[lo:hi] = np.take(self.lut_px, np.minimum(tmp * (1023 / 1.5), 2047).astype(np.uint16))
+        else:
+            c = np.clip(tmp, 0, 1) * 255 + 0.5
+            px = pack(c[..., 0], c[..., 1], c[..., 2], self.fmt)
+            px[tmp[..., 0] > OUTSIDE / 4] = 0
+            out[lo:hi] = px
+
+    # ------------------------------------------------------------ whole pictures
+    def canvas(self, grid, cursor=None):
+        """The full canvas (before the glass) for a grid of cells."""
+        self.reset()
+        self.update(grid, cursor)
+        return self.cbuf.copy()
+
+    def finish(self, canvas, persist=False):
+        """A whole finished picture of a canvas, as (h, w, 4) uint8 (RGBX layout)."""
+        dt = np.uint32 if self.fmt["bpp"] == 32 else np.uint16
+        out = np.zeros((self.out_h, self.out_w), dt)
+        self.finish_rows(canvas, 0, self.out_h, out)
+        return out.view(np.uint8).reshape(out.shape + (-1,))
+
+    def picture(self):
+        """The current frame as (h, w, 4) uint8."""
+        return self.frame.view(np.uint8).reshape(self.frame.shape + (-1,))
 
     def render(self, term, cursor_on=True):
-        """One finished frame of a vt.VT terminal."""
+        """One finished picture of a vt.VT terminal, drawn from scratch."""
         cur = (term.x, term.y) if cursor_on and term.cursor_visible else None
-        return self.finish(self.canvas(term.grid, cur))
+        self.reset()
+        self.update(term.grid, cur)
+        return self.picture()
 
     # ------------------------------------------------------------ power on / off
     def power(self, canvas, t, on=True):
         """
         The tube switching on (t 0 -> 1) or off. on: a bright line opens into the picture.
         off: the picture collapses into a line, the line into a dot, and the dot fades.
-        Returns a canvas for finish(..., persist=False).
+        Returns a canvas for finish().
         """
         H, W = canvas.shape[:2]
         cy, cx = H // 2, W // 2

@@ -156,6 +156,39 @@ def test_menu(tmp):
     print("      picture: " + out)
 
 
+def test_screen(tmp, font_path=None):
+    """pontes screen drawing into a file instead of a display, with keys typed on the 'console'."""
+    import pty
+    import select
+    import signal
+    import time
+    fbfile = os.path.join(tmp, "fb.raw")
+    args = [sys.executable, os.path.join(HERE, "..", "retromenu", "pontes.py"), "screen",
+            "--fb-file", fbfile, "--size", "1024x768", "--effects", "full"]
+    if font_path:
+        args += ["--font", font_path]
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.environ.update(HOME=tmp, XDG_CONFIG_HOME=os.path.join(tmp, ".config"))
+        os.execv(args[0], args)
+    start, sent = time.time(), False
+    while time.time() - start < 5:
+        if not sent and time.time() - start > 3:
+            os.write(fd, b"\x1b[B")  # Down, as the Linux console sends it
+            sent = True
+        if select.select([fd], [], [], 0.1)[0]:
+            try:
+                os.read(fd, 4096)
+            except OSError:
+                break
+    pic = np.fromfile(fbfile, np.uint8).reshape(768, 1024, 4)
+    check("screen: draws on the display", int(pic[..., 1].max()) > 150)
+    os.kill(pid, signal.SIGTERM)
+    os.waitpid(pid, 0)
+    crt.write_png(os.path.join(tmp, "screen.png"), pic)
+    print("      picture: " + os.path.join(tmp, "screen.png"))
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="pcal-crt-")
     font = test_fonts(tmp)
@@ -164,6 +197,7 @@ def main():
     test_renderer(font, tmp)
     if "--menu" in sys.argv:
         test_menu(tmp)
+        test_screen(tmp)
     print(f"\n{'ALL OK' if not FAILS else str(len(FAILS)) + ' FAILED'}")
     sys.exit(1 if FAILS else 0)
 
