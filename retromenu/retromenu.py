@@ -128,6 +128,14 @@ K_ENTER = (10, 13, curses.KEY_ENTER)
 
 EXIT = object()  # returned by the "Exit" item to leave the program
 
+STDSCR = []  # the main window, once the program runs
+IN_SCREEN = bool(os.environ.get("PCAL_SCREEN"))  # running inside the graphical screen (pontes screen)
+SCREEN_KEYS = ("theme", "effects", "screen_font", "screen_glow", "screen_scanlines",
+               "screen_curvature", "screen_afterglow")
+# Which graphical-screen effects each Effects level switches on (unless set one by one)
+SCREEN_FX = {"off": (), "subtle": ("glow", "scanlines"), "full": ("glow", "scanlines", "curvature", "afterglow")}
+FONT_SIZES = (12, 14, 16, 18, 20, 22, 24, 28, 32)
+
 
 # --------------------------------------------------------------------- helpers
 def item(label, action=None, sub=None, desc=""):
@@ -490,6 +498,7 @@ class Entry:
 class App:
     def __init__(self, scr):
         self.scr = scr
+        STDSCR[:] = [scr]
         self.cfg = load_config()
         self.plugins = []
         self.bg = lambda: None  # redraws whatever screen is currently below a dialog
@@ -567,9 +576,15 @@ class App:
         v = self.cfg.get("effects", "subtle")
         return v if v in ("off", "subtle", "full") else "subtle"
 
+    @property
+    def text_fx(self):
+        """The text-mode imitations of CRT effects. Inside the graphical screen it does the real
+        thing (power on/off, afterglow, flicker), so these stay off there."""
+        return "off" if IN_SCREEN else self.fx
+
     def afterglow(self, key, sel):
         """Phosphor afterglow: the row you just left fades out instead of switching off."""
-        if key is None or self.fx == "off":
+        if key is None or self.text_fx == "off":
             return -1, None
         now = time.monotonic()
         state = self.glow.get(key)
@@ -594,7 +609,7 @@ class App:
 
     def crt(self, draw, on=True):
         """Old monitor power on/off: the picture opens from (or collapses into) a bright line."""
-        if self.fx == "off":
+        if self.text_fx == "off":
             return
         full = self.fx == "full"
         H, W = self.scr.getmaxyx()
@@ -635,7 +650,7 @@ class App:
 
     def maybe_flicker(self):
         """Full effects on the Linux console: now and then the tube flickers for one frame."""
-        if self.fx == "full" and self.cfg.get("console_palette") and random.random() < 0.03:
+        if self.text_fx == "full" and self.cfg.get("console_palette") and random.random() < 0.03:
             console_flicker(self.cfg.get("theme"))
 
     @staticmethod
@@ -942,6 +957,8 @@ class App:
             return -1
         if isinstance(k, str):
             return k if k.isprintable() else ord(k)
+        if k == curses.KEY_RESIZE and STDSCR:
+            STDSCR[0].clearok(True)  # new size: repaint everything, not just the differences
         return k
 
     # ---- generic full-screen menu (main menu, settings)
@@ -1351,6 +1368,16 @@ class App:
             if key == "console_palette" and not value:
                 console_palette_reset()
             self.apply_theme()
+        if IN_SCREEN and key in SCREEN_KEYS:
+            self.tell_screen("reload")
+
+    @staticmethod
+    def tell_screen(what):
+        """Send a request to the graphical screen around us (an escape sequence it understands)."""
+        try:
+            os.write(sys.stdout.fileno(), f"\x1b]7770;{what}\x07".encode())
+        except OSError:
+            pass
 
     def edit(self, key, label):
         val = self.prompt(label, str(self.cfg[key]))
@@ -1382,6 +1409,8 @@ class App:
                 item("Effects", desc=self.fx.upper() + "  (CRT power on/off, afterglow)",
                      sub=lambda: [item(v.upper(), lambda v=v: self.set("effects", v))
                                   for v in ("off", "subtle", "full")]),
+                item("Graphical screen", self.screen_settings,
+                     desc=("font, glow, scanlines, curvature" if IN_SCREEN else "settings for pontes screen")),
                 item("Console palette", lambda: self.set("console_palette", not c["console_palette"]),
                      desc=onoff(c["console_palette"]) + " (Linux console only)"),
                 item("Reboot command", lambda: self.edit("reboot_cmd", "Reboot command"),
@@ -1393,6 +1422,48 @@ class App:
             ]
 
         self.menu_screen("SETTINGS", build, headers=("SETTING", "VALUE"))
+
+    def screen_fx(self, name):
+        """Is this graphical-screen effect on? (set one by one, or else by the Effects level)"""
+        v = self.cfg.get("screen_" + name)
+        return name in SCREEN_FX[self.fx] if v is None else bool(v)
+
+    def screen_settings(self):
+        c = self.cfg
+
+        def toggle(name):
+            return lambda: self.set("screen_" + name, not self.screen_fx(name))
+
+        def state(name):
+            on = "ON" if self.screen_fx(name) else "OFF"
+            return on + ("  (from Effects)" if c.get("screen_" + name) is None else "")
+
+        def build():
+            size = c.get("screen_font") or 0
+            items = [
+                item("Font size", desc=(f"{size}" if size else "AUTO") + "  (character height in pixels)",
+                     sub=lambda: [item("AUTO", lambda: self.set("screen_font", 0))]
+                     + [item(str(n), lambda n=n: self.set("screen_font", n)) for n in FONT_SIZES]),
+                item("Glow", toggle("glow"), desc=state("glow")),
+                item("Scanlines", toggle("scanlines"), desc=state("scanlines")),
+                item("Curvature", toggle("curvature"), desc=state("curvature") + "  (slower)"),
+                item("Afterglow", toggle("afterglow"), desc=state("afterglow")),
+                item("Follow Effects", self.screen_follow_effects, desc=f"use the {self.fx.upper()} level again"),
+            ]
+            if not IN_SCREEN:
+                items.append(item("How to start", lambda: self.show_text("GRAPHICAL SCREEN", [
+                    "These settings are for the graphical screen: the menu drawn as a CRT monitor.",
+                    "Start it from a console (not over SSH) with:  pontes screen",
+                    "It needs py3-numpy, font-terminus and access to /dev/fb0 (group video)."]),
+                    desc="pontes screen"))
+            return items
+
+        self.menu_screen("GRAPHICAL SCREEN", build, headers=("SETTING", "VALUE"))
+
+    def screen_follow_effects(self):
+        for k in ("glow", "scanlines", "curvature", "afterglow"):
+            self.cfg.pop("screen_" + k, None)
+        self.set("effects", self.fx)
 
     def reset(self):
         self.cfg.clear()

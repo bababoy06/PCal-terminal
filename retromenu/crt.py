@@ -281,8 +281,10 @@ class Renderer:
             fx, fy = fx.ravel()[self.inside], fy.ravel()[self.inside]
             x0, y0 = fx.astype(np.int32), fy.astype(np.int32)
             self.remap = y0 * W + x0
-            # bilinear sampling at scale 1, so thin strokes stay smooth instead of breaking up
-            self.remap_w = (fx - x0, fy - y0) if self.scale == 1 else None
+            # bilinear sampling for thin strokes (small fonts at scale 1), so they stay smooth;
+            # big fonts and scaled-up pictures have thick enough lines for the faster nearest pixel
+            thin = self.scale == 1 and self.font.height < 24
+            self.remap_w = (fx - x0, fy - y0) if thin else None
             del su, sv, fx, fy, inside
         shade = 1 - self.fx["vignette"] * np.clip((u * u * 0.8 + v * v) * 0.55, 0, 1) ** 1.5
         self.shade = shade.astype(np.float32) if self.mono else shade.astype(np.float32)[..., None]

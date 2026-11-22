@@ -95,6 +95,8 @@ For a nicer console font: `apk add terminus-font` then `setfont ter-v18n`.
 the display through the framebuffer: phosphor glow, scanlines, a curved tube, afterglow and the
 power on/off effect. No X or Wayland. Not started automatically yet.
 
+- Settings > Graphical screen: font size (automatic or 12-32), and glow, scanlines, curvature and
+  afterglow one by one (by default they follow Settings > Effects). Changes show at once.
 - `screen.py`: the live screen: runs the program in a pseudo-terminal, passes your keys on,
   draws only what changed, and gives the console back when you switch away (Alt+F1..F6).
   Without numpy, a font or a framebuffer it just runs the program in text mode.
