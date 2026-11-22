@@ -1147,8 +1147,8 @@ class App:
             act()
         return bool(answer and answer[0])
 
-    def prompt(self, label, initial=""):
-        """One-line text input. Returns the string, or None on ESC."""
+    def prompt(self, label, initial="", secret=False):
+        """One-line text input. Returns the string, or None on ESC. secret: show dots (passwords)."""
         H, W = self.scr.getmaxyx()
         w = min(W, max(48, len(label) + 8, len(initial) + 8))
         h = 5
@@ -1163,6 +1163,8 @@ class App:
                 self.bg()
                 win.erase()
                 text = "".join(buf)
+                if secret:
+                    text = ("•" if self.utf8 else "*") * len(buf)
                 vis = text[-(field - 1):] if len(text) >= field else text
                 self.draw_table(win, 0, 0, h, w, 1, lambda i: ((vis,), self.bold), pointer=False,
                                 title=label.upper(), footer="ENTER ok  ESC cancel")

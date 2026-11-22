@@ -13,6 +13,7 @@ so PCal has to be one. Bonus: once PCal is a package, updating is just `apk upgr
 | `/usr/share/retromenu/plugins/` | example plugins |
 | `/etc/profile.d/pcal.sh` | UTF-8 locale for the console |
 | `/usr/sbin/pcal-setup` | the installer (`distro/install.sh`): login screen, menu autostart, doas rule, console font |
+| `/usr/sbin/pcal-install` | the PCal installer on the live ISO (`pcal-install --dry-run` to just look) |
 | `/usr/sbin/pcal-live` | tty1 of the live ISO (falls back to a normal login once installed) |
 | `/usr/share/licenses/pcal/LICENSE` | GPL-3.0 |
 

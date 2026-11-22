@@ -172,6 +172,10 @@ def main():
         check("menu: Log out exits cleanly", s.exited() == 0)
         s.kill()
 
+        # --- installer: refuses to install outside the live ISO (this is never a live system)
+        s = Session(base + ["install"], home)
+        check("install: refuses to run outside the live ISO", s.expect("PCal ISO", 5) and s.exited() == 1)
+
         # --- login screen (no real login: --login-cmd points at a harmless program)
         s = Session(base + ["login", "--user", "nosuchuser", "--login-cmd", "/bin/true"], home)
         check("login: login screen appears", s.expect("SYSTEM LOGIN", 8))

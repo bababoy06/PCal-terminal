@@ -54,15 +54,25 @@ come from the Alpine mirror, and takes a few minutes. The ISO uses the same Alpi
 
 ## Using it
 
-1. Boot the ISO in a VM (or write it to a USB stick). The boot screen and PCal menu appear on their own.
-2. Choose **Install PCal**. This runs Alpine's `setup-alpine`: pick your keyboard, hostname, network and timezone, **create a user**, and at the disk question choose your disk and **`sys`**.
-3. Remove the ISO, reboot, log in as **root** and run:
-   ```sh
-   pcal-setup
-   ```
-4. Reboot once more: the RetroLogin screen appears, and after logging in, the menu.
+1. Boot the ISO in a VM (or from a USB stick). The boot screen and PCal menu appear on their own.
+2. Choose **Install PCal**. The PCal installer asks, step by step:
+   keyboard layout (switched on right away) · computer name · time zone · network (wired, DHCP) ·
+   SSH server yes/no · your user name and password · root password · the disk (type `YES` to erase it).
+3. A summary shows all choices. **INSTALL PCAL** then runs Alpine's own tools, visibly, in this order:
 
-Steps 2–4 become one retro install screen in the next step (ISO step 3).
+   | Step | Command |
+   |---|---|
+   | Alpine setup | `setup-alpine -e -f /tmp/pcal-answers` (keyboard, name, network, DNS, time zone, mirrors, NTP, SSH) |
+   | User account | `adduser` + `addgroup` (wheel, audio, video, netdev, input) + doas for `wheel`, like `setup-user -a` |
+   | Passwords | `chpasswd -e`, in the classic `$6$` format that the console, SSH and RetroLogin all check |
+   | Disk | `setup-disk -m sys /dev/DISK`, what `setup-alpine` runs last |
+   | PCal | `chroot` into the new system, then `pcal-setup USER` (login screen + menu) |
+
+   If Alpine asks something extra, you answer it right there. Everything is logged to `/tmp/pcal-install.log`.
+4. Remove the ISO, press Enter: the computer reboots into the PCal login screen.
+
+`pcal-install --dry-run` goes through every screen and prints what it would run, without changing anything.
+It works anywhere (no root needed), so it's handy while developing.
 
 ## Safety notes
 
