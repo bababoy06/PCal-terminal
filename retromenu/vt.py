@@ -32,6 +32,7 @@ class VT:
     def __init__(self, rows=30, cols=100):
         self.rows, self.cols = rows, cols
         self.replies = []          # text to send back to the program
+        self.commands = []         # PCal requests (ESC ] 7770 ; text BEL), e.g. "reload"
         self.title = ""
         self.palette = {}          # Linux console palette changes (ESC ] P n rrggbb)
         self.dirty = True
@@ -187,6 +188,8 @@ class VT:
             body = m.group(1)
             if body[:2] in ("0;", "2;"):
                 self.title = body[2:]
+            elif body.startswith("7770;"):  # PCal: a request for the graphical screen
+                self.commands.append(body[5:])
             return m.end()
         if nxt in "P^_":  # device control strings: skip up to the terminator
             end = data.find("\x1b\\", i + 2)

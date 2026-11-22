@@ -54,13 +54,41 @@ def log(msg):
     sys.stderr.write(f"pontes screen: {msg}\n")
 
 
-def load_settings():
+SCREEN_EFFECTS = ("glow", "scanlines", "curvature", "afterglow")
+
+
+def load_config():
     try:
         with open(CONFIG_FILE) as f:
-            cfg = json.load(f)
+            return json.load(f)
     except (OSError, ValueError):
-        cfg = {}
-    return cfg.get("theme", "green"), EFFECTS.get(cfg.get("effects", "subtle"), "light")
+        return {}
+
+
+def resolve(cfg, theme=None, effects=None, font_size=0):
+    """
+    What the screen should look like: Settings (config.json), overridden by command line options.
+    Effects OFF / SUBTLE / FULL is the starting point; Settings > Graphical screen can switch
+    glow, scanlines, curvature and afterglow on or off one by one.
+    """
+    import crt
+    level = EFFECTS.get(effects or cfg.get("effects", "subtle"), "light")
+    preset = dict(zip(crt.EFFECT_NAMES, crt.EFFECT_LEVELS[level]))
+    full = dict(zip(crt.EFFECT_NAMES, crt.EFFECT_LEVELS["full"]))
+    fx = dict(preset)
+    if not effects:  # chosen in Settings, not on the command line
+        for k in SCREEN_EFFECTS:
+            v = cfg.get("screen_" + k)
+            if v is True:
+                fx[k] = preset[k] or full[k]
+            elif v is False:
+                fx[k] = 0.0
+    try:
+        size = int(font_size or cfg.get("screen_font") or 0)
+    except (TypeError, ValueError):
+        size = 0
+    return {"theme": theme or cfg.get("theme", "green"), "fx": fx, "level": level,
+            "power": level != "off", "font_size": size}
 
 
 # ---------------------------------------------------------------- the display
@@ -169,7 +197,10 @@ class Child:
         import pty
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
-            env = dict(os.environ, TERM="xterm-256color", PCAL_SCREEN="1", COLUMNS=str(cols), LINES=str(rows))
+            # no COLUMNS/LINES: curses would believe them over the real size, also after a resize
+            env = dict(os.environ, TERM="xterm-256color", PCAL_SCREEN="1")
+            env.pop("COLUMNS", None)
+            env.pop("LINES", None)
             try:
                 os.execvpe(cmd[0], cmd, env)
             except OSError as e:
@@ -177,6 +208,10 @@ class Child:
             os._exit(127)
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         self.status = None
+
+    def resize(self, rows, cols):
+        """New terminal size: the program gets SIGWINCH and redraws."""
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
     def write(self, text):
         try:
@@ -209,18 +244,20 @@ def translate_keys(data, term):
 
 
 # ---------------------------------------------------------------- main loop
-def run(cmd, fb, renderer, effects_on=True, max_fps=40):
+def run(cmd, fb, make, first=None, max_fps=40):
+    """make() -> (renderer, power effect on?), called again when Settings change."""
     import vt
+    renderer, effects_on = first or make()
     term = vt.VT(renderer.rows, renderer.cols)
     child = Child(cmd, renderer.rows, renderer.cols)
     try:
-        return _loop(child, term, fb, renderer, effects_on, max_fps)
+        return _loop(child, term, fb, renderer, effects_on, max_fps, make)
     finally:
         if child.status is None:
             child.stop()
 
 
-def _loop(child, term, fb, renderer, effects_on, max_fps):
+def _loop(child, term, fb, renderer, effects_on, max_fps, make):
     dec = codecs.getincrementaldecoder("utf-8")("replace")
     keydec = codecs.getincrementaldecoder("utf-8")("replace")
     with Console() as con:
@@ -250,6 +287,15 @@ def _loop(child, term, fb, renderer, effects_on, max_fps):
                 if term.replies:
                     child.write("".join(term.replies))
                     term.replies.clear()
+                if "reload" in term.commands:  # Settings changed: new look, maybe a new font size
+                    renderer, effects_on = make()
+                    if (renderer.rows, renderer.cols) != (term.rows, term.cols):
+                        term.resize(renderer.rows, renderer.cols)
+                        term.feed("\x1b[2J")  # the program repaints everything for the new size
+                        child.resize(renderer.rows, renderer.cols)
+                    renderer.reset()
+                    fb.show(renderer.frame)  # the whole picture: margins and glass may have changed
+                term.commands.clear()
                 blink_on, next_blink, need = True, time.monotonic() + 0.5, True
             if con.fd in r:
                 keys = os.read(con.fd, 4096)
@@ -320,10 +366,11 @@ def choose_layout(w, h, font_size=0, scale=0, effects="light", font_path=None):
 
 
 # ---------------------------------------------------------------- speed test
-def bench(size, theme, effects, font_size, scale, font_path=None):
+def bench(size, opts, scale, font_path=None):
     import crt
     w, h = size
-    font, s = choose_layout(w, h, font_size, scale, effects, font_path)
+    theme, effects = opts["theme"], opts["fx"]
+    font, s = choose_layout(w, h, opts["font_size"], scale, effects, font_path)
     t0 = time.monotonic()
     r = crt.Renderer(font, size, s, theme, effects)
     setup = time.monotonic() - t0
@@ -350,7 +397,8 @@ def bench(size, theme, effects, font_size, scale, font_path=None):
         r.update(g, now=time.monotonic())
         moves.append(time.monotonic() - t0)
     print(f"screen {w}x{h}: {r.cols}x{r.rows} characters, {os.path.basename(font.path)} x{s}, "
-          f"theme {theme}, effects {effects}")
+          f"theme {theme}, effects {opts['level']} "
+          f"({', '.join(k for k in SCREEN_EFFECTS if effects[k]) or 'none'})")
     print(f"  setup          {setup * 1000:6.0f} ms   (once, at start)")
     print(f"  first picture  {first * 1000:6.0f} ms")
     print(f"  full redraw    {full * 1000:6.0f} ms   (a whole new screen)")
@@ -386,9 +434,8 @@ def entry(argv=None):
     ap.add_argument("--bench", action="store_true", help="measure drawing speed and exit")
     ap.add_argument("cmd", nargs="*", help="program to run (default: the PCal menu)")
     a = ap.parse_args(argv)
-    theme, effects = load_settings()
-    theme = a.theme or theme
-    effects = EFFECTS.get(a.effects or effects, "light")
+    if a.effects and a.effects not in EFFECTS:
+        ap.error(f"--effects: choose off, light or full (not {a.effects!r})")
     cmd = a.cmd or [sys.executable, os.path.join(HERE, "retromenu.py")]
     if getattr(sys, "frozen", False) and not a.cmd:
         cmd = [sys.executable, "menu"]  # the release program: `pontes menu`
@@ -397,20 +444,29 @@ def entry(argv=None):
         import crt
     except ImportError:
         return text_mode(cmd, "numpy is not installed (apk add py3-numpy)")
+
+    def options():
+        return resolve(load_config(), a.theme, a.effects, a.font_size)
+
     if a.bench:
-        return bench(parse_size(a.size), theme, effects, a.font_size, a.scale, a.font)
+        return bench(parse_size(a.size), options(), a.scale, a.font)
     try:
         fb = Framebuffer(a.fb_file, parse_size(a.size)) if a.fb_file else Framebuffer(a.fb)
     except OSError as e:
         return text_mode(cmd, f"no graphical display ({e})")
+
+    def make():
+        o = options()
+        font, scale = choose_layout(fb.w, fb.h, o["font_size"], a.scale, o["fx"], a.font)
+        return crt.Renderer(font, (fb.w, fb.h), scale, o["theme"], o["fx"], fmt=fb.fmt), o["power"]
+
     try:
-        font, scale = choose_layout(fb.w, fb.h, a.font_size, a.scale, effects, a.font)
-        renderer = crt.Renderer(font, (fb.w, fb.h), scale, theme, effects, fmt=fb.fmt)
+        first = make()  # check that it works before taking over the console
     except OSError as e:
         fb.close()
         return text_mode(cmd, str(e))
     try:
-        return run(cmd, fb, renderer, effects_on=effects != "off")
+        return run(cmd, fb, make, first)
     finally:
         fb.close()
 
