@@ -150,7 +150,8 @@ def main():
         # --- menu
         s = Session(base + ["menu"], home)
         check("menu: main menu appears", s.expect("MAIN MENU", 8))
-        s.send(ENTER, 0.8)  # Files is the first item
+        s.send(DOWN, 0.3)  # Desk is the first item, Files the second
+        s.send(ENTER, 0.8)
         check("menu: file manager opens", s.expect("FILES ::"))
         check("menu: lists the home folder", s.expect("docs/"))
         s.send(ENTER, 0.6)  # actions for docs/: Open folder, Open terminal here, Details ...
@@ -159,10 +160,13 @@ def main():
         check("menu: file details open", s.expect("DETAILS") and s.expect("PERMS"))
         s.send(ENTER, 0.5)
         s.send("q", 0.6)
-        s.send(UP + UP + UP + UP, 0.5)  # up from Files wraps: Log out, Shut down, Reboot, Settings
+        s.send(UP + UP + UP + UP + UP, 0.5)  # up from Files: Desk, then wraps: Log out ... Settings
         s.send(ENTER, 0.8)
         check("menu: settings open", s.expect("SETTINGS"))
         s.send(ESC, 0.6)
+        s.send("\x1bOH" + ENTER, 2.0)  # Home: the Desk
+        check("menu: the Desk opens", s.expect("COMMAND DECK", 4))
+        s.send("q", 1.5)
         s.send("i")
         s.send("echo SMOKE-$((6*7))" + ENTER, 1.5)
         check("menu: command line runs a command", s.expect("SMOKE-42"))

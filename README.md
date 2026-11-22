@@ -14,7 +14,8 @@ No desktop, no window system: fast, and easy to understand.
 
 ## What's in it
 
-- **Home menu**: files, terminal, process monitor, your own programs (plugins), settings, reboot, shut down, log out.
+- **Home menu**: the Desk, files, terminal, process monitor, your own programs (plugins), settings, reboot, shut down, log out.
+- **The Desk**: a command deck reached through a warp animation: tiles for your programs, plugins and tools, live telemetry and a scrolling ticker.
 - **Command line under the menu**: press `i`, type a command, see its output without leaving the menu. Programs that need the whole screen (`vim`, `top`, `ssh`...) get it automatically.
 - **File manager**: `ls -l` style list with permissions, size and date; open, view, edit, rename, delete, file details, terminal here.
 - **SYSTEM STATUS panel** (`s`): CPU, memory and disk bars, load, network address, uptime, battery and temperature on laptops.
@@ -42,6 +43,7 @@ Already running Alpine? [`distro/install.sh`](distro/README.md) (`pcal-setup`) t
 |---|---|
 | Everywhere | `↑` `↓` move (also `k` `j`) · `→` / `Enter` open (also `l`) · `←` / `Esc` back (also `h`) |
 | Main menu | `i` type a command · `t` full terminal · `s` show/hide SYSTEM STATUS |
+| Desk | arrows / `h` `j` `k` `l` move · `Enter` open · `1`-`9` open a tile directly · `q` back to the menu |
 | Command line | `Enter` run · `!cmd` run in the full terminal · `↑` `↓` history · `PgUp` `PgDn` scroll output · `Esc` back to the menu |
 | File manager | `Enter` actions · `→` open folder · `←` up · `.` hidden files · `t` terminal here · `q` back |
 | Login screen | `Tab` / `Enter` next field · `Esc` clear · `Alt+F2` the normal console login |
@@ -50,7 +52,7 @@ Already running Alpine? [`distro/install.sh`](distro/README.md) (`pcal-setup`) t
 
 | Folder | What |
 |---|---|
-| [`retromenu/`](retromenu/) | the programs, pure Python standard library: `retromenu.py` (menu), `retrologin.py` (login screen), `retroinstall.py` (installer), `pontes.py` (one program that runs them all, like busybox) |
+| [`retromenu/`](retromenu/) | the programs, pure Python standard library: `retromenu.py` (menu), `desk.py` (the Desk), `retrologin.py` (login screen), `retroinstall.py` (installer), `pontes.py` (one program that runs them all, like busybox) |
 | [`build/`](build/) | turns the Python code into a self-contained program (PyInstaller) |
 | [`packaging/alpine/`](packaging/alpine/) | turns that program into the Alpine package `pcal-*.apk` |
 | [`iso/`](iso/) | builds the bootable PCal ISO with Alpine's `mkimage` |

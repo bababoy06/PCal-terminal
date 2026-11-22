@@ -1259,6 +1259,7 @@ class App:
     def main_items(self):
         c = self.cfg
         items = [
+            item("Desk", self.desk, desc="Your command deck"),
             item("Files", self.files.run, desc="Browse and manage files"),
             item("Terminal", lambda: self.open_terminal(os.path.expanduser("~")),
                  desc="Open the full command line"),
@@ -1274,6 +1275,10 @@ class App:
             item("Log out", lambda: EXIT, desc="Back to the login screen"),
         ]
         return items
+
+    def desk(self):
+        import desk
+        return desk.Desk(self).run()
 
     # ---- plugins
     def plugin_item(self, p):
