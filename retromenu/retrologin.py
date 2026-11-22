@@ -24,8 +24,8 @@ import sys
 import time
 import warnings
 
-SYSTEM_NAME = "PONTES-CALOS"
-TAGLINE = "PCAL -- A PONTES-CALOS SYSTEM"
+SYSTEM_NAME = "PCAL"
+TAGLINE = "PONTES-CALOS SYSTEM"
 COPYRIGHT = "(C) PONTES-CALOS DATA SYSTEMS"
 SHADOW = "/etc/shadow"
 DELAY_AFTER_FAIL = 2  # seconds, every wrong password
@@ -45,6 +45,14 @@ FONT = {
     "-": ["    ", " __ ", "|__|", "    "],
 }
 BANNER = ["".join(FONT[c][row] for c in SYSTEM_NAME) for row in range(4)]
+
+# The big title in block letters (Unicode screens); render_banner() is the ASCII fallback.
+BLOCK_BANNER = [
+    "██▀▀▀▀▀██   ██▀▀▀▀▀▀▀   ██▀▀▀▀▀██   ██       ",
+    "██▄▄▄▄▄██   ██          ██▄▄▄▄▄██   ██       ",
+    "██          ██          ██     ██   ██       ",
+    "▀▀          ▀▀▀▀▀▀▀▀▀   ▀▀     ▀▀   ▀▀▀▀▀▀▀▀▀",
+]
 
 THEMES = {  # 8-colour base, 256-colour (normal, bright, dim), Linux console RGB
     "green": (curses.COLOR_GREEN, (77, 120, 28), ("020a04", "33ff66", "b4ffc8", "1d6b34")),
@@ -175,6 +183,7 @@ class LoginScreen:
             self.tty = "console"
         enc = locale.nl_langinfo(locale.CODESET).upper().replace("-", "")
         u = enc == "UTF8" and box_style != "ascii"
+        self.banner = BLOCK_BANNER if u else BANNER
         # single lines on the Linux console (many console fonts lack the double-line set)
         single = box_style == "single" or (box_style != "double" and os.environ.get("TERM") == "linux")
         if not u:
@@ -224,11 +233,11 @@ class LoginScreen:
         H, W = self.scr.getmaxyx()
         B = self.B
         self.scr.erase()
-        bw = len(BANNER[0])
+        bw = len(self.banner[0])
         y = max(0, H // 2 - 10)
         if W >= bw + 2 and H >= 20:
             x = (W - bw) // 2
-            for i, line in enumerate(BANNER):
+            for i, line in enumerate(self.banner):
                 put(self.scr, y + i, x, line, self.bold)
             put(self.scr, y + 5, x + bw - len(TAGLINE), TAGLINE, self.norm)
             y += 7
@@ -328,7 +337,7 @@ class LoginScreen:
         for s in range(steps + 1):
             self.draw(busy=label)
             filled = bar_w * s // steps
-            y = max(0, H // 2 - 10) + (7 if H >= 20 and W >= len(BANNER[0]) + 2 else 2) + 10
+            y = max(0, H // 2 - 10) + (7 if H >= 20 and W >= len(self.banner[0]) + 2 else 2) + 10
             x = (W - bar_w) // 2
             put(self.scr, y, x, self.B["block"] * filled, self.bold)
             put(self.scr, y, x + filled, self.B["shade"] * (bar_w - filled), self.dim)

@@ -33,9 +33,9 @@ import textwrap
 import time
 
 VERSION = "0.6"
-SYSTEM_NAME = "PONTES-CALOS"
+SYSTEM_NAME = "PCAL"
 SHORT_NAME = "PCal"
-TAGLINE = f"PCAL {VERSION} -- A PONTES-CALOS SYSTEM"
+TAGLINE = f"PONTES-CALOS SYSTEM  //  V{VERSION}"
 COPYRIGHT = "(C) PONTES-CALOS DATA SYSTEMS"
 
 CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "retromenu")
@@ -108,6 +108,14 @@ def render_banner(text):
 
 
 BANNER = render_banner(SYSTEM_NAME)
+
+# The big title in block letters (Unicode screens); render_banner() is the ASCII fallback.
+BLOCK_BANNER = [
+    "██▀▀▀▀▀██   ██▀▀▀▀▀▀▀   ██▀▀▀▀▀██   ██       ",
+    "██▄▄▄▄▄██   ██          ██▄▄▄▄▄██   ██       ",
+    "██          ██          ██     ██   ██       ",
+    "▀▀          ▀▀▀▀▀▀▀▀▀   ▀▀     ▀▀   ▀▀▀▀▀▀▀▀▀",
+]
 
 UNICODE_CHARS = dict(tl="╔", tr="╗", bl="╚", br="╝", h="═", v="║", lt="╠", rt="╣",
                      tt="╦", bt="╩", x="╬", ptr="►", sub="»", up="▲", down="▼",
@@ -520,6 +528,10 @@ class App:
         self.con_buf, self.con_cur, self.con_out, self.con_top, self.con_rows = "", 0, [], 0, 0
         self.history, self.hist_i, self.hist_saved = self.load_history(), None, ""
 
+    def banner(self):
+        """The title: block letters where the screen can show them, else ASCII art."""
+        return BANNER if self.box_chars() is ASCII_CHARS else BLOCK_BANNER
+
     def box_chars(self):
         style = self.cfg.get("box_style", "auto")
         if not self.utf8 or style == "ascii":
@@ -712,14 +724,15 @@ class App:
     # ---- screen furniture
     def draw_header(self, H, W, info=True):
         """Big banner + tagline when there is room. Returns the next free row."""
-        if H >= 26 and W >= len(BANNER[0]) + 4:
-            x = (W - len(BANNER[0])) // 2
-            for i, line in enumerate(BANNER):
+        banner = self.banner()
+        if H >= 26 and W >= len(banner[0]) + 4:
+            x = (W - len(banner[0])) // 2
+            for i, line in enumerate(banner):
                 put(self.scr, 1 + i, x, line, self.bold)
-            put(self.scr, 5, x + len(BANNER[0]) - len(TAGLINE), TAGLINE, self.norm)
+            put(self.scr, 5, x + len(banner[0]) - len(TAGLINE), TAGLINE, self.norm)
             y = 7
         else:
-            put(self.scr, 0, 1, f"PCAL {VERSION} :: A PONTES-CALOS SYSTEM"[: W - 2], self.bold)
+            put(self.scr, 0, 1, f"PCAL {VERSION} :: PONTES-CALOS SYSTEM"[: W - 2], self.bold)
             y = 1
         if info:
             line = f"USER {self.user}  HOST {self.host}  {sysinfo()}"
@@ -1464,11 +1477,12 @@ class App:
     def draw_splash(self, log, progress, typed=None, refresh=True):
         H, W = self.scr.getmaxyx()
         self.scr.erase()
-        bw = len(BANNER[0])
+        banner = self.banner()
+        bw = len(banner[0])
         y = max(0, H // 2 - 9)
         if W >= bw + 2:
             x = (W - bw) // 2
-            for j, line in enumerate(BANNER):
+            for j, line in enumerate(banner):
                 put(self.scr, y + j, x, line, self.bold)
             put(self.scr, y + 5, x + bw - len(TAGLINE), TAGLINE, self.norm)
         else:
