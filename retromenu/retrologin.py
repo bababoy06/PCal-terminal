@@ -55,33 +55,44 @@ THEMES = {  # 8-colour base, 256-colour (normal, bright, dim), Linux console RGB
 
 
 # ------------------------------------------------------------- password check
-def _crypt_function():
-    """crypt(3) without the `crypt` module (it was removed in Python 3.13)."""
+def _crypt_backends():
+    """Every crypt(3) we can reach. Each knows a different set of password formats:
+    musl's built-in one (Alpine) only does the older ones, a libxcrypt libcrypt also
+    does yescrypt ($y$), which newer password tools write."""
+    found = []
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         try:
             import crypt as _crypt  # Python <= 3.12
-            return _crypt.crypt
+            found.append(_crypt.crypt)
         except ImportError:
             pass
-    import ctypes
-    import ctypes.util
-    for name in (None, ctypes.util.find_library("crypt"), "libcrypt.so.1", "libcrypt.so.2"):
+    try:
+        import ctypes
+        import ctypes.util
+    except ImportError:
+        return found
+    seen = set()
+    for name in ("libcrypt.so.2", "libcrypt.so.1", ctypes.util.find_library("crypt"), None):
         try:
-            fn = ctypes.CDLL(name).crypt  # musl has crypt() in libc itself
-        except (OSError, AttributeError):
+            fn = ctypes.CDLL(name).crypt  # None = the C library itself (musl has crypt() there)
+        except (OSError, AttributeError, TypeError):
             continue
+        addr = ctypes.cast(fn, ctypes.c_void_p).value
+        if addr in seen:
+            continue
+        seen.add(addr)
         fn.restype = ctypes.c_char_p
         fn.argtypes = (ctypes.c_char_p, ctypes.c_char_p)
 
         def crypt(password, salt, fn=fn):
             out = fn(password.encode(), salt.encode())
-            return out.decode() if out else ""
-        return crypt
-    return None
+            return out.decode(errors="replace") if out else ""
+        found.append(crypt)
+    return found
 
 
-CRYPT = _crypt_function()
+CRYPT_BACKENDS = _crypt_backends()
 # Used for unknown users, so a wrong name takes as long as a wrong password.
 DUMMY_HASH = "$6$pontescalos$" + "x" * 86
 
@@ -98,20 +109,40 @@ def shadow_hash(user):
     return None
 
 
+def hash_format(hashed):
+    """'$y$' (yescrypt), '$6$' (sha512), ... or 'DES' for the oldest format."""
+    if hashed.startswith("$") and "$" in hashed[1:]:
+        return hashed[: hashed.index("$", 1) + 1]
+    return "DES"
+
+
+def _understands(result, hashed):
+    """A crypt() that doesn't know a format returns nothing or '*0'/'*1', not a hash like it."""
+    return bool(result) and not result.startswith("*") and result[:3] == hashed[:3] \
+        and len(result) == len(hashed)
+
+
 def check_password(user, password):
-    """True only for an existing, unlocked account with a password that matches."""
-    if CRYPT is None:
-        return False
+    """
+    "ok"          existing, unlocked account and the password matches
+    "bad"         wrong password, unknown or locked account, or no password set
+    "unsupported" the account's password format can't be checked here
+                  (the caller then hands over to the system login, which can)
+    """
     try:
         pwd.getpwnam(user)
         hashed = shadow_hash(user)
     except KeyError:
         hashed = None
     if not hashed or hashed[0] in "!*":  # unknown, locked, or no password at all
-        CRYPT(password, DUMMY_HASH)
-        return False
-    result = CRYPT(password, hashed)
-    return bool(result) and hmac.compare_digest(result, hashed)
+        for crypt in CRYPT_BACKENDS[:1]:
+            crypt(password, DUMMY_HASH)
+        return "bad"
+    for crypt in CRYPT_BACKENDS:
+        result = crypt(password, hashed)
+        if _understands(result, hashed):
+            return "ok" if hmac.compare_digest(result, hashed) else "bad"
+    return "unsupported"
 
 
 # ------------------------------------------------------------------ screen
@@ -305,7 +336,7 @@ class LoginScreen:
             time.sleep(seconds / steps)
 
     def run(self):
-        """Returns the user name once the right password was given."""
+        """Returns (user, verified). verified=False: the system login has to ask for the password."""
         self.crt(on=True)
         while True:
             self.draw()
@@ -348,17 +379,22 @@ class LoginScreen:
                 user, password = self.user.strip(), self.password
                 self.password = ""
                 self.draw(busy="VERIFYING...")
-                if user and check_password(user, password):
+                result = check_password(user, password) if user else "bad"
+                if result == "ok":
                     self.fails = 0
                     self.progress("ACCESS GRANTED", 0.4)
                     self.crt(on=False, busy="ACCESS GRANTED")
-                    return user
+                    return user, True
+                if result == "unsupported":
+                    # e.g. yescrypt ($y$) with only musl's crypt(): let the system login check it
+                    msg = f"PASSWORD FORMAT {hash_format(shadow_hash(user) or '')}: SYSTEM LOGIN TAKES OVER"
+                    self.say(msg)
+                    self.progress(msg, 1.5)
+                    self.crt(on=False)
+                    return user, False
                 self.fails += 1
                 self.progress("VERIFYING...", DELAY_AFTER_FAIL)
-                if CRYPT is None:
-                    self.say("ERROR: NO crypt() ON THIS SYSTEM -- USE Alt+F2")
-                else:
-                    self.say(f"ACCESS DENIED ({self.fails})")
+                self.say(f"ACCESS DENIED ({self.fails})")
                 if self.fails % LOCK_AFTER == 0:
                     self.locked_until = time.time() + LOCK_SECONDS
 
@@ -398,10 +434,14 @@ def main():
         locale.setlocale(locale.LC_ALL, "C")
 
     theme, effects, box_style = user_settings(default_user)
-    user = curses.wrapper(lambda scr: LoginScreen(scr, default_user, theme, effects, box_style).run())
-    # Hand over: login -f skips its own password prompt (we already checked) and
-    # sets up the session, utmp, HOME and the user's shell.
-    os.execv(login_cmd, [os.path.basename(login_cmd), "-f", user])
+    user, verified = curses.wrapper(lambda scr: LoginScreen(scr, default_user, theme, effects, box_style).run())
+    if verified:
+        # login -f skips its own password prompt (we already checked) and
+        # sets up the session, utmp, HOME and the user's shell.
+        os.execv(login_cmd, [os.path.basename(login_cmd), "-f", user])
+    # We couldn't check this password format: the system login asks for the password itself.
+    print("\n  PCal can't check this account's password format; the system login asks for it.\n")
+    os.execv(login_cmd, [os.path.basename(login_cmd), user])
 
 
 def entry():
