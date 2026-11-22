@@ -58,7 +58,7 @@ case "$ALPINE_VERSION" in
     *) REL="v${ALPINE_VERSION%.*}" BRANCH="${ALPINE_VERSION%.*}-stable" ;;
 esac
 
-APK=$(ls "$REPO/$ARCH"/pcal-"$VERSION"-r*.apk 2>/dev/null | tail -1)
+APK=$(ls -t "$REPO/$ARCH"/pcal-"$VERSION"-r*.apk 2>/dev/null | head -1)  # the newest build
 [ -n "$APK" ] && [ -f "$REPO/$ARCH/APKINDEX.tar.gz" ] \
     || die "no pcal $VERSION package in $REPO/$ARCH. Run first: sh packaging/alpine/build-apk.sh"
 tar -tzf "$APK" 2>/dev/null | grep -q '^usr/sbin/pcal-live$' \

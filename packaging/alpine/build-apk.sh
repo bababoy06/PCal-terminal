@@ -13,8 +13,12 @@
 # and then as YOURUSER (log out and in after addgroup):
 #   abuild-keygen -a -i -n
 #
-# Output: dist/apk/pcal/ARCH/pcal-VERSION-r0.apk plus a signed APKINDEX,
+# Output: dist/apk/pcal/ARCH/pcal-VERSION-rNUMBER.apk plus a signed APKINDEX,
 # so dist/apk/pcal can be used as an apk repository.
+#
+# NUMBER (the package release) is the build time, e.g. r2611221432, so every
+# build is newer than the last one and `doas apk add --allow-untrusted FILE`
+# always upgrades. Set PKGREL=N to choose it yourself (e.g. for an official release).
 set -eu
 
 die() {
@@ -42,21 +46,24 @@ trap 'rm -rf "$WORK"' EXIT
 # abuild names the repository after the folder above the recipe: WORK/pcal/pcal/APKBUILD -> repo "pcal"
 REC=$WORK/pcal/pcal
 mkdir -p "$REC" "$WORK/distfiles"
-sed -e "s/^pkgver=.*/pkgver=$VERSION/" -e "s/^arch=.*/arch=\"$ARCH\"/" "$HERE/APKBUILD" >"$REC/APKBUILD"
+PKGREL=${PKGREL:-$(date -u +%y%m%d%H%M)}
+case "$PKGREL" in *[!0-9]* | "") die "PKGREL must be a number" ;; esac
+sed -e "s/^pkgver=.*/pkgver=$VERSION/" -e "s/^pkgrel=.*/pkgrel=$PKGREL/" -e "s/^arch=.*/arch=\"$ARCH\"/" \
+    "$HERE/APKBUILD" >"$REC/APKBUILD"
 cp "$HERE/pcal.profile.sh" "$HERE/pcal-live" "$REC/"
 cp "$TOP/distro/install.sh" "$REC/pcal-setup"
 cp "$TOP/LICENSE" "$REC/"
 # Put the archive where abuild looks for downloads, so nothing is fetched (works for a private repo too)
 cp "$ARCHIVE" "$WORK/distfiles/pontes-calos-linux-$ARCH-musl-$VERSION.tar.gz"
 
-echo "packaging PCal $VERSION for $ARCH"
+echo "packaging PCal $VERSION-r$PKGREL for $ARCH"
 cd "$REC"
 export SRCDEST="$WORK/distfiles" REPODEST="$OUT"
 abuild checksum || die "abuild could not compute the checksums (see the messages above)"
 abuild -P "$OUT" || die "abuild stopped (exit code $?). The lines starting with >>> above say why"
 
-APK=$(ls "$OUT/pcal/$ARCH/pcal-$VERSION"-r*.apk 2>/dev/null | tail -1)
-[ -n "$APK" ] || die "abuild finished but no package was found in $OUT/pcal/$ARCH"
+APK="$OUT/pcal/$ARCH/pcal-$VERSION-r$PKGREL.apk"
+[ -f "$APK" ] || die "abuild finished but $APK was not created"
 echo
 echo "done: $APK"
-echo "install it here with:  doas apk add --allow-untrusted $APK"
+echo "install or upgrade it here with:  doas apk add --allow-untrusted $APK"
