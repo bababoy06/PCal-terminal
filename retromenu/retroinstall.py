@@ -12,8 +12,10 @@ same order setup-alpine uses:
                                    proxy, NTP, package mirrors, SSH
                                    (user and disk are done in the next steps)
   2. adduser / addgroup / chpasswd the user account and passwords (as setup-user)
-  3. setup-disk -m sys DISK        what setup-alpine runs last
-  4. chroot NEW-SYSTEM pcal-setup  PCal login screen and menu on the new system
+  3. a note in /etc/pcal/firstboot (setup-disk copies /etc to the disk)
+  4. setup-disk -m sys DISK        what setup-alpine runs last
+On its first start the new system sees the note and runs pcal-setup itself
+(PCal login screen and menu), then shows the login screen.
 
 Every command runs visibly in the terminal and is logged to /tmp/pcal-install.log.
 If Alpine asks something extra, you can answer it right there.
@@ -38,7 +40,6 @@ import retrologin
 
 LOG = "/tmp/pcal-install.log"
 ANSWERS = "/tmp/pcal-answers"
-TARGET = "/mnt/pcal-target"
 BKEYMAPS = "/usr/share/bkeymaps"
 
 # Shown first; everything Alpine has is under "Other layout..."
@@ -517,29 +518,16 @@ def plan(a):
         "mkdir -p /etc/doas.d && "
         "{ grep -qs ':wheel' /etc/doas.d/*.conf || echo 'permit persist :wheel' > /etc/doas.d/20-wheel.conf; }"
     )
-    target_sh = (
-        # setup-disk leaves the new system unmounted: mount its root filesystem
-        f"part=$(blkid | grep '^{disk}' | grep 'TYPE=\"ext4\"' | tail -1 | cut -d: -f1) && "
-        f"[ -n \"$part\" ] || {{ echo 'no ext4 root partition found on {disk}'; exit 1; }} && "
-        f"mkdir -p {TARGET} && mount \"$part\" {TARGET} && "
-        f"mount --bind /dev {TARGET}/dev && mount --bind /proc {TARGET}/proc && mount --bind /sys {TARGET}/sys && "
-        # setup-disk copies the settings in /etc (so the account exists) but not /home:
-        # give the user a home folder on the new system, the way adduser makes one
-        f"chroot {TARGET} sh -c '[ -d /home/{user} ] || {{ mkdir -p /home/{user} && "
-        f"cp -a /etc/skel/. /home/{user}/ 2>/dev/null; chown -R {user}:{user} /home/{user} && "
-        f"chmod 700 /home/{user}; }}' && "
-        f"chroot {TARGET} pcal-setup {user}; rc=$?; "
-        f"umount {TARGET}/sys {TARGET}/proc {TARGET}/dev {TARGET}; exit $rc"
-    )
     return [
         ("Alpine setup: keyboard, name, network, time, mirrors, SSH",
          ["setup-alpine", "-e", "-f", ANSWERS], {}, None),
         (f"User account {user} (like setup-user)", ["sh", "-c", user_sh], {}, None),
         ("Passwords for root and " + user + " ($6$ format)",
          ["chpasswd", "-e"], {}, f"root:{a['root_hash']}\n{user}:{a['user_hash']}\n"),
+        ("PCal setup on the first start (note for the new system)",
+         ["sh", "-c", f"mkdir -p /etc/pcal && echo {user} > /etc/pcal/firstboot"], {}, None),
         (f"Installing on {disk} (setup-disk -m sys)",
          ["setup-disk", "-m", "sys", disk], {"ERASE_DISKS": disk}, None),
-        ("PCal login screen and menu on the new system (pcal-setup)", ["sh", "-c", target_sh], {}, None),
     ]
 
 
@@ -626,6 +614,7 @@ def main():
         return 1
     say("\nPCal is installed.", "1;32")
     say("Remove the ISO (or USB stick), then press ENTER to reboot.", "1")
+    say("On its first start PCal finishes its setup by itself, then shows the login screen.", "1")
     try:
         input()
     except EOFError:

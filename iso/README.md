@@ -65,11 +65,12 @@ come from the Alpine mirror, and takes a few minutes. The ISO uses the same Alpi
    | Alpine setup | `setup-alpine -e -f /tmp/pcal-answers` (keyboard, name, network, DNS, time zone, mirrors, NTP, SSH) |
    | User account | `adduser` + `addgroup` (wheel, audio, video, netdev, input) + doas for `wheel`, like `setup-user -a` |
    | Passwords | `chpasswd -e`, in the classic `$6$` format that the console, SSH and RetroLogin all check |
+   | Note for the first start | `/etc/pcal/firstboot` with the user name (copied to the disk with the rest of `/etc`) |
    | Disk | `setup-disk -m sys /dev/DISK`, what `setup-alpine` runs last |
-   | PCal | `chroot` into the new system, then `pcal-setup USER` (login screen + menu) |
 
    If Alpine asks something extra, you answer it right there. Everything is logged to `/tmp/pcal-install.log`.
-4. Remove the ISO, press Enter: the computer reboots into the PCal login screen.
+4. Remove the ISO, press Enter to reboot. On its **first start**, the new system sees the note, runs
+   `pcal-setup` by itself (you see it on screen), and then shows the PCal login screen.
 
 `pcal-install --dry-run` goes through every screen and prints what it would run, without changing anything.
 It works anywhere (no root needed), so it's handy while developing.
