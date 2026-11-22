@@ -40,13 +40,14 @@ sh build/build.sh                    # the release build (if you don't have it y
 sh packaging/alpine/build-apk.sh     # the package
 ```
 
-Result: `dist/apk/pcal/x86_64/pcal-0.6-r0.apk`, plus a signed `APKINDEX.tar.gz` next to it.
+Result: `dist/apk/pcal/x86_64/pcal-0.6-rNUMBER.apk`, where NUMBER is the build time (e.g. `r2611221432`), so each build is newer than the last, plus a signed `APKINDEX.tar.gz` next to it.
 `dist/apk/pcal` is a complete little apk repository.
 
 Install it on the same machine:
 
 ```sh
-doas apk add --allow-untrusted dist/apk/pcal/x86_64/pcal-0.6-r0.apk
+doas apk add --allow-untrusted dist/apk/pcal/x86_64/pcal-0.6-r2611221432.apk   # the file build-apk.sh printed;
+                                                                         # installs, or upgrades an older build
 pontes --version
 ```
 
