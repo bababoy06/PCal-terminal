@@ -97,6 +97,10 @@ power on/off effect. No X or Wayland. Not started automatically yet.
 
 - Settings > Graphical screen: font size (automatic or 12-32), and glow, scanlines, curvature and
   afterglow one by one (by default they follow Settings > Effects). Changes show at once.
+- `deck.py`: the Desk, the command deck (graphical screen only; Desk in the main menu): numbered
+  modules (01 TERMINAL, 02 FILES, ... 00 SETTINGS) that run in a window, SYSTEM INTEGRITY with live
+  meters and an event log, and a taskbar. 0-9 open a module, TAB switches, X closes, F12 hands
+  the keys back from a module to the deck, Q returns to the menu.
 - `screen.py`: the live screen: runs the program in a pseudo-terminal, passes your keys on,
   draws only what changed, and gives the console back when you switch away (Alt+F1..F6).
   Without numpy, a font or a framebuffer it just runs the program in text mode.

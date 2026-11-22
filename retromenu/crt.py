@@ -154,9 +154,11 @@ class Renderer:
     def _build_lut(self):
         """Intensity (0..1.5 in 1024 steps) -> phosphor pixel; entries 1024+ are black."""
         if not self.mono:
+            self.levels = {"dim": 0.35, "normal": 0.7, "bright": 1.0}
             return
         glass, dim, normal, bright = (_hex(h) for h in PHOSPHOR[self.theme])
         n, b, d = (luminance(PALETTE[i]) for i in MENU_COLOURS[self.theme])
+        self.levels = {"dim": d, "normal": n, "bright": b}
         white = np.ones(3, np.float32)
         xs = [0.0, d, n, b, 1.0, 1.5]
         stops = [glass, dim, normal, bright, bright * 0.75 + white * 0.25, white]
@@ -297,6 +299,7 @@ class Renderer:
         self.frame = np.zeros((self.out_h, self.out_w), dt)
         self.finish_rows(self.cbuf, 0, self.out_h, self.frame)
         self.shown = [None] * self.rows
+        self.shown_img = None
         self.fades = []
 
     # ------------------------------------------------------------ effects helpers
@@ -334,18 +337,19 @@ class Renderer:
         return out
 
     # ------------------------------------------------------------ drawing
-    def _draw_band(self, keys, a, b, now):
-        """Redraw text rows a..b into the canvas (with scanlines and glow)."""
+    def _draw_band(self, row_img, a, b, now, had):
+        """Redraw text rows a..b into the canvas (with scanlines and glow).
+        row_img(y) gives text row y at font resolution; had: was something drawn there before."""
         s, fh, G = self.scale, self.font.height, self.glow_rows
         c0, c1 = max(0, a - G), min(self.rows - 1, b + G)
-        base = np.concatenate([self.row_image(keys[y]) for y in range(c0, c1 + 1)], 0)
+        base = np.concatenate([row_img(y) for y in range(c0, c1 + 1)], 0)
         y0, y1 = (a - c0) * fh, (b - c0 + 1) * fh
         part = base[y0:y1]
         ya, yb = self.oy + a * self.ch, self.oy + (b + 1) * self.ch
         xa, xb = self.ox, self.ox + self.cols * self.cw
         region = self.cbuf[ya:yb, xa:xb]
         ghost = None
-        if self.fx["afterglow"] > 0 and self.shown[a] is not None:
+        if self.fx["afterglow"] > 0 and had:
             ghost = region.copy()  # what was there: it fades out instead of vanishing
             for f in [f for f in self.fades if f[0] < yb and f[1] > ya]:
                 self.cbuf[f[0]:f[1], xa:xb] = f[2]
@@ -388,6 +392,17 @@ class Renderer:
     def animating(self):
         return bool(self.fades)
 
+    def _bands(self, changed):
+        """Changed text rows -> bands to redraw, widened by the rows their glow reaches."""
+        G, bands = self.glow_rows, []
+        for y in changed:
+            a, b = max(0, y - G), min(self.rows - 1, y + G)
+            if bands and a <= bands[-1][1] + 1:
+                bands[-1][1] = max(bands[-1][1], b)
+            else:
+                bands.append([a, b])
+        return bands
+
     def update(self, grid, cursor=None, now=None):
         """Redraw what changed; returns the screen rows [(top, bottom)] updated in .frame."""
         now = time.monotonic() if now is None else now
@@ -395,17 +410,34 @@ class Renderer:
         changed = [y for y in range(self.rows) if keys[y] != self.shown[y]]
         dirty = self._tick_fades(now) if self.fades else []
         if changed:
-            G = self.glow_rows
-            bands = []
-            for y in changed:
-                a, b = max(0, y - G), min(self.rows - 1, y + G)
-                if bands and a <= bands[-1][1] + 1:
-                    bands[-1][1] = max(bands[-1][1], b)
-                else:
-                    bands.append([a, b])
-            for a, b in bands:
-                dirty.append(self._draw_band(keys, a, b, now))
+            had = self.shown_img is None and any(k is not None for k in self.shown)
+            for a, b in self._bands(changed):
+                dirty.append(self._draw_band(lambda y: self.row_image(keys[y]), a, b, now, had))
             self.shown = keys
+            self.shown_img = None
+        return self.finish_dirty(dirty)
+
+    def update_image(self, img, now=None):
+        """
+        Like update(), for a picture instead of text: img is the whole text area at font
+        resolution (rows*font height x cols*font width), intensities 0..1.5 (RGB for colour).
+        Used by the Desk, which draws its own panels. Only rows that changed are redrawn.
+        """
+        now = time.monotonic() if now is None else now
+        fh = self.font.height
+        prev = self.shown_img
+        if prev is None or prev.shape != img.shape:
+            changed = list(range(self.rows))
+            had = prev is not None or any(k is not None for k in self.shown)
+        else:
+            diff = (img != prev).reshape(self.rows, -1).any(axis=1)
+            changed = np.flatnonzero(diff).tolist()
+            had = True
+        dirty = self._tick_fades(now) if self.fades else []
+        for a, b in self._bands(changed):
+            dirty.append(self._draw_band(lambda y: img[y * fh:(y + 1) * fh], a, b, now, had))
+        self.shown_img = img
+        self.shown = [None] * self.rows
         return self.finish_dirty(dirty)
 
     def finish_dirty(self, dirty):

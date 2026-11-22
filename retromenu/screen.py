@@ -28,6 +28,11 @@ import termios
 import time
 import tty
 
+try:
+    import numpy as np
+except ImportError:  # checked in entry(): without numpy the screen falls back to text mode
+    np = None
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
@@ -244,84 +249,174 @@ def translate_keys(data, term):
 
 
 # ---------------------------------------------------------------- main loop
+class Pane:
+    """A program on the screen: its process, its terminal, its text decoder."""
+
+    def __init__(self, child, term):
+        self.child, self.term = child, term
+        self.dec = codecs.getincrementaldecoder("utf-8")("replace")
+
+
 def run(cmd, fb, make, first=None, max_fps=40):
     """make() -> (renderer, power effect on?), called again when Settings change."""
     import vt
     renderer, effects_on = first or make()
-    term = vt.VT(renderer.rows, renderer.cols)
-    child = Child(cmd, renderer.rows, renderer.cols)
+    menu = Pane(Child(cmd, renderer.rows, renderer.cols), vt.VT(renderer.rows, renderer.cols))
+    session = Session(cmd, fb, make, renderer, effects_on, menu, max_fps)
     try:
-        return _loop(child, term, fb, renderer, effects_on, max_fps, make)
+        return session.loop()
     finally:
-        if child.status is None:
-            child.stop()
+        for p in [menu] + (session.deck.panes() if session.deck else []):
+            if p.child.status is None:
+                p.child.stop()
 
 
-def _loop(child, term, fb, renderer, effects_on, max_fps, make):
-    dec = codecs.getincrementaldecoder("utf-8")("replace")
-    keydec = codecs.getincrementaldecoder("utf-8")("replace")
-    with Console() as con:
-        if effects_on:
-            animate(fb, renderer, con, renderer.cbuf, on=True, seconds=0.7)
-        fb.show(renderer.frame)
-        blink_on, next_blink, last_draw = True, time.monotonic() + 0.5, 0.0
-        need = True
-        while True:
-            now = time.monotonic()
-            timeout = max(0.0, next_blink - now)
-            if renderer.animating:
-                timeout = min(timeout, 0.03)
-            r, _, _ = select.select([child.fd, con.fd], [], [], timeout)
-            if child.fd in r:
-                data = child.read()
-                if not data:
+class Session:
+    """Everything on the screen: the menu, and the Desk with its module windows."""
+
+    def __init__(self, cmd, fb, make, renderer, effects_on, menu, max_fps):
+        self.cmd, self.fb, self.make = cmd, fb, make
+        self.renderer, self.effects_on = renderer, effects_on
+        self.menu, self.max_fps = menu, max_fps
+        self.deck = None
+        self.view = "menu"  # or "deck"
+        self.need = True
+
+    def spawn(self, cmd, rows, cols):
+        return Child(cmd, rows, cols)
+
+    def open_deck(self):
+        import deck
+        if self.deck is None:
+            self.deck = deck.Deck(self.renderer, self.cmd, self.spawn, CONFIG_FILE)
+        else:
+            self.deck.log("OPERATOR ON DECK")
+        self.view = "deck"
+        self.renderer.reset()
+        self.need = True
+
+    def close_deck(self):
+        self.view = "menu"
+        self.renderer.reset()
+        self.need = True
+
+    def reload(self):
+        """Settings changed: a new picture, maybe a new size for every program."""
+        r, self.effects_on = self.make()
+        t = self.menu.term
+        if (r.rows, r.cols) != (t.rows, t.cols):
+            t.resize(r.rows, r.cols)
+            t.feed("\x1b[2J")  # the program repaints everything for the new size
+            self.menu.child.resize(r.rows, r.cols)
+        self.renderer = r
+        if self.deck:
+            self.deck.set_renderer(r)
+        r.reset()
+        self.fb.show(r.frame)  # the whole picture: margins and glass may have changed
+        self.need = True
+
+    def panes(self):
+        """(pane, window) for every running program; window is None for the menu."""
+        out = [(self.menu, None)]
+        if self.deck:
+            out += [(w, w) for w in self.deck.panes()]
+        return out
+
+    def feed(self, pane, data):
+        pane.term.feed(pane.dec.decode(data))
+        if pane.term.replies:
+            pane.child.write("".join(pane.term.replies))
+            pane.term.replies.clear()
+        cmds, pane.term.commands[:] = list(pane.term.commands), []
+        if "reload" in cmds:
+            self.reload()
+        if "desk" in cmds and pane is self.menu:
+            self.open_deck()
+
+    def loop(self):
+        fb = self.fb
+        keydec = codecs.getincrementaldecoder("utf-8")("replace")
+        with Console() as con:
+            if self.effects_on:
+                animate(fb, self.renderer, con, self.renderer.cbuf, on=True, seconds=0.7)
+            fb.show(self.renderer.frame)
+            blink_on, next_blink, last_draw = True, time.monotonic() + 0.5, 0.0
+            next_tick = time.monotonic() + 1.0
+            while True:
+                now = time.monotonic()
+                timeout = max(0.0, min(next_blink, next_tick if self.view == "deck" else next_blink) - now)
+                if self.renderer.animating:
+                    timeout = min(timeout, 0.03)
+                panes = self.panes()
+                fds = {p.child.fd: (p, w) for p, w in panes}
+                r, _, _ = select.select(list(fds) + [con.fd], [], [], timeout)
+                ended = False
+                for fd in r:
+                    if fd == con.fd:
+                        continue
+                    pane, win = fds[fd]
+                    data = pane.child.read()
+                    if not data:
+                        if win is None:  # the menu has ended: so does the screen
+                            ended = True
+                        else:
+                            pane.child.wait()
+                            self.deck.close(win, ended=True)
+                        self.need = True
+                        continue
+                    # take everything that is already there, so a screen redraw is done in one go
+                    deadline = time.monotonic() + 0.012
+                    while time.monotonic() < deadline and select.select([fd], [], [], 0.002)[0]:
+                        more = pane.child.read()
+                        if not more:
+                            break
+                        data += more
+                    self.feed(pane, data)
+                    if self.view == "menu" and win is None or self.view == "deck" and win is not None:
+                        blink_on, next_blink, self.need = True, time.monotonic() + 0.5, True
+                if ended:
                     break
-                # take everything that is already there, so a screen redraw is done in one go
-                deadline = time.monotonic() + 0.012
-                while time.monotonic() < deadline and select.select([child.fd], [], [], 0.002)[0]:
-                    more = child.read()
-                    if not more:
-                        break
-                    data += more
-                term.feed(dec.decode(data))
-                if term.replies:
-                    child.write("".join(term.replies))
-                    term.replies.clear()
-                if "reload" in term.commands:  # Settings changed: new look, maybe a new font size
-                    renderer, effects_on = make()
-                    if (renderer.rows, renderer.cols) != (term.rows, term.cols):
-                        term.resize(renderer.rows, renderer.cols)
-                        term.feed("\x1b[2J")  # the program repaints everything for the new size
-                        child.resize(renderer.rows, renderer.cols)
-                    renderer.reset()
-                    fb.show(renderer.frame)  # the whole picture: margins and glass may have changed
-                term.commands.clear()
-                blink_on, next_blink, need = True, time.monotonic() + 0.5, True
-            if con.fd in r:
-                keys = os.read(con.fd, 4096)
-                if keys:
-                    child.write(translate_keys(keydec.decode(keys), term))
-            now = time.monotonic()
-            if now >= next_blink:
-                blink_on, next_blink, need = not blink_on, now + 0.5, True
-            if not con.active:
-                continue
-            if con.redraw:
-                con.redraw = False
-                renderer.reset()
-                need = True
-            if (need or renderer.animating) and now - last_draw >= 1 / max_fps:
-                cursor = (term.x, term.y) if blink_on and term.cursor_visible else None
-                rows = renderer.update(term.grid, cursor, now)
-                if rows:
-                    fb.show(renderer.frame, rows)
-                need, last_draw = False, now
-        status = child.wait()
-        if effects_on and con.active:
-            renderer.update(term.grid)
-            animate(fb, renderer, con, renderer.cbuf.copy(), on=False, seconds=0.6)
-        fb.clear()
-    return status
+                if con.fd in r:
+                    keys = os.read(con.fd, 4096)
+                    if keys:
+                        text = keydec.decode(keys)
+                        if self.view == "menu":
+                            self.menu.child.write(translate_keys(text, self.menu.term))
+                        elif self.deck.key(text, translate_keys) == "exit":
+                            self.close_deck()
+                        self.need = True
+                now = time.monotonic()
+                if now >= next_blink:
+                    blink_on, next_blink, self.need = not blink_on, now + 0.5, True
+                if now >= next_tick:
+                    next_tick = now + 1.0
+                    if self.view == "deck":
+                        self.need = True
+                if not con.active:
+                    continue
+                if con.redraw:
+                    con.redraw = False
+                    self.renderer.reset()
+                    self.need = True
+                if (self.need or self.renderer.animating) and now - last_draw >= 1 / self.max_fps:
+                    if self.view == "menu":
+                        t = self.menu.term
+                        cursor = (t.x, t.y) if blink_on and t.cursor_visible else None
+                        rows = self.renderer.update(t.grid, cursor, now)
+                    else:
+                        img = self.deck.compose(now, blink_on)
+                        if not self.renderer.mono:
+                            img = img[..., None] * np.array([0.3, 1.0, 0.45], np.float32)
+                        rows = self.renderer.update_image(img, now)
+                    if rows:
+                        fb.show(self.renderer.frame, rows)
+                    self.need, last_draw = False, now
+            status = self.menu.child.wait()
+            if self.effects_on and con.active:
+                self.renderer.update(self.menu.term.grid)
+                animate(fb, self.renderer, con, self.renderer.cbuf.copy(), on=False, seconds=0.6)
+            fb.clear()
+        return status
 
 
 def animate(fb, renderer, con, canvas, on, seconds):

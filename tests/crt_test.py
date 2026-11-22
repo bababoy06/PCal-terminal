@@ -140,6 +140,44 @@ def test_renderer(font, tmp):
     check("png: written", head[:8] == b"\x89PNG\r\n\x1a\n" and struct.unpack(">II", head[16:24]) == (400, 300))
 
 
+def test_deck(font, tmp):
+    """The Desk's picture and keys, without starting any programs."""
+    import deck
+    r = crt.Renderer(font, (1600, 900), 1, "amber", "light")
+    started = []
+
+    class FakeChild:
+        def __init__(self, cmd, rows, cols):
+            started.append((cmd, rows, cols))
+
+        def write(self, text):
+            started.append(("keys", text))
+
+        def resize(self, rows, cols):
+            pass
+
+        def stop(self):
+            pass
+
+    d = deck.Deck(r, ["menu"], FakeChild, os.path.join(tmp, "none.json"))
+    img = d.compose(0.0)
+    check("deck: picture covers the text area", img.shape == (r.rows * font.height, r.cols * font.width))
+    check("deck: something drawn", float(img.max()) > 0.5)
+    d.key("4", lambda t, term: t)
+    check("deck: offline module opens a card", d.shown is not None and d.shown.info is not None)
+    check("deck: q closes the card first", d.key("q", lambda t, term: t) is None and d.shown is None)
+    d.key("1", lambda t, term: t)
+    check("deck: module 01 starts a program", started and started[0][1:] == d.inner and d.focus == "window")
+    d.key("ls\r", lambda t, term: t)
+    check("deck: keys go to the program", ("keys", "ls\r") in started)
+    d.key("\x1b[24~", lambda t, term: t)
+    check("deck: F12 gives the keys back to the deck", d.focus == "deck")
+    check("deck: picture with a window", d.compose(1.0).shape == img.shape)
+    check("deck: q returns to the menu", d.key("q", lambda t, term: t) == "exit")
+    r.update_image(d.compose(2.0))
+    check("render: deck picture becomes a frame", int(r.picture()[..., :3].max()) > 100)
+
+
 def test_menu(tmp):
     """The real menu in a pseudo-terminal, read by vt.py and drawn by crt.py."""
     font = psf.PSFFont(psf.find_font(16)) if psf.find_font(16) else None
@@ -195,6 +233,7 @@ def main():
     test_box_glyphs()
     test_vt()
     test_renderer(font, tmp)
+    test_deck(font, tmp)
     if "--menu" in sys.argv:
         test_menu(tmp)
         test_screen(tmp)
