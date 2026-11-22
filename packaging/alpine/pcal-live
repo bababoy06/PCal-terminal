@@ -13,7 +13,10 @@
 root_fs=$(awk '$2 == "/" { fs = $3 } END { print fs }' /proc/mounts 2>/dev/null)
 
 if [ "${PCAL_LIVE_FORCE:-}" != 1 ] && [ "$root_fs" != tmpfs ]; then
-    exec /sbin/getty 38400 tty1  # installed system: normal login
+    # installed system, but pcal-setup hasn't run yet (it replaces this tty1 line)
+    printf '\n  \033[1;32mPCal is installed.\033[0m To switch on the PCal login screen and menu,\n'
+    printf '  log in as \033[1mroot\033[0m and run:  \033[1;32mpcal-setup\033[0m   (then reboot)\n\n'
+    exec /sbin/getty 38400 tty1  # normal login
 fi
 
 export HOME=/root USER=root LOGNAME=root SHELL=/bin/ash
