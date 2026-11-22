@@ -3,7 +3,7 @@
 # (it fills in pkgver, arch and the checksum, then runs abuild).
 pkgname=pcal
 pkgver=0.6
-pkgrel=2
+pkgrel=3
 pkgdesc="PCal (Pontes-Calos): retro green-CRT home menu and login screen"
 url="https://github.com/bababoy06/Pontes-Calos"
 arch="x86_64"
