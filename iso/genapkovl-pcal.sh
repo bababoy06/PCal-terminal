@@ -94,8 +94,8 @@ makefile root:root 0644 "$tmp"/root/.config/retromenu/plugins/00-install.json <<
 {
   "name": "Install PCal",
   "description": "Put PCal on this computer's disk",
-  "command": "setup-alpine && printf '\\n  PCal is on the disk. Remove the ISO, reboot, log in as root and run:  pcal-setup\\n  (it turns on the PCal login screen and menu for your user)\\n'",
-  "pause": true
+  "command": "pcal-install",
+  "pause": false
 }
 EOF
 makefile root:root 0644 "$tmp"/root/.config/retromenu/config.json <<EOF

@@ -34,6 +34,8 @@ package() {
 	install -Dm755 "$srcdir"/pcal-setup "$pkgdir"/usr/sbin/pcal-setup
 	# pcal-live: tty1 of the live ISO (falls back to a normal login once installed)
 	install -Dm755 "$srcdir"/pcal-live "$pkgdir"/usr/sbin/pcal-live
+	# pcal-install: the installer on the live ISO (the pontes program, started under this name)
+	ln -s /usr/lib/pcal/pontes/pontes "$pkgdir"/usr/sbin/pcal-install
 	install -Dm644 "$srcdir"/LICENSE "$pkgdir"/usr/share/licenses/$pkgname/LICENSE
 }
 
