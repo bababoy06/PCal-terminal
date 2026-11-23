@@ -32,7 +32,7 @@ import sys
 import textwrap
 import time
 
-VERSION = "0.6"
+VERSION = "0.7"
 SYSTEM_NAME = "PONTES-CALOS"
 SHORT_NAME = "PCal"
 TAGLINE = f"PCAL {VERSION} -- A PONTES-CALOS SYSTEM"
