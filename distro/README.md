@@ -16,14 +16,14 @@ Log in as root, then run either:
 
 ```sh
 apk add git
-git clone https://github.com/bababoy06/Pontes-Calos
+git clone https://github.com/bababoy06/PCal-terminal
 sh Pontes-Calos/distro/install.sh --fast-boot
 ```
 
 or, if the repository is public, without git:
 
 ```sh
-wget -qO- https://raw.githubusercontent.com/bababoy06/Pontes-Calos/main/distro/install.sh | sh -s -- --fast-boot
+wget -qO- https://raw.githubusercontent.com/bababoy06/PCal-terminal/main/distro/install.sh | sh -s -- --fast-boot
 ```
 
 The installer downloads the latest **release build**, which has Python built in, so `python3` isn't installed at all. If there is no release yet (or the repository is private), it installs the Python source instead. You can choose explicitly with `--binary pontes-calos-linux-x86_64-musl.tar.gz` (a file you copied over) or `--from-source`.
