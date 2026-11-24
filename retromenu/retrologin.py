@@ -24,7 +24,9 @@ import sys
 import time
 import warnings
 
-SYSTEM_NAME = "PONTES-CALOS"
+import title as titlefont  # noqa: E402  (the big title's letters, shared with the menu)
+
+SYSTEM_NAME = titlefont.DEFAULT
 TAGLINE = "PCAL -- A PONTES-CALOS SYSTEM"
 COPYRIGHT = "(C) PONTES-CALOS DATA SYSTEMS"
 SHADOW = "/etc/shadow"
@@ -32,19 +34,7 @@ DELAY_AFTER_FAIL = 2  # seconds, every wrong password
 LOCK_AFTER = 5  # wrong passwords in a row ...
 LOCK_SECONDS = 30  # ... lock the screen this long
 
-FONT = {
-    "P": [" ___ ", "| _ \\", "|  _/", "|_|  "],
-    "O": ["  ___  ", " / _ \\ ", "| (_) |", " \\___/ "],
-    "N": [" _  _ ", "| \\| |", "| .` |", "|_|\\_|"],
-    "T": [" _____ ", "|_   _|", "  | |  ", "  |_|  "],
-    "E": [" ___ ", "| __|", "| _| ", "|___|"],
-    "S": [" ___ ", "/ __|", "\\__ \\", "|___/"],
-    "C": ["  ___ ", " / __|", "| (__ ", " \\___|"],
-    "A": ["   _   ", "  /_\\  ", " / _ \\ ", "/_/ \\_\\"],
-    "L": [" _    ", "| |   ", "| |__ ", "|____|"],
-    "-": ["    ", " __ ", "|__|", "    "],
-}
-BANNER = ["".join(FONT[c][row] for c in SYSTEM_NAME) for row in range(4)]
+BANNER = titlefont.render(SYSTEM_NAME)
 
 THEMES = {  # 8-colour base, 256-colour (normal, bright, dim), Linux console RGB
     "green": (curses.COLOR_GREEN, (77, 120, 28), ("020a04", "33ff66", "b4ffc8", "1d6b34")),
@@ -159,7 +149,9 @@ def put(win, y, x, text, attr=0):
 
 
 class LoginScreen:
-    def __init__(self, scr, default_user, theme, effects="subtle", box_style="auto"):
+    def __init__(self, scr, default_user, theme, effects="subtle", box_style="auto", name=None):
+        self.name = titlefont.clean(name)
+        self.banner = titlefont.render(self.name)
         self.scr = scr
         self.user = default_user
         self.password = ""
@@ -224,16 +216,17 @@ class LoginScreen:
         H, W = self.scr.getmaxyx()
         B = self.B
         self.scr.erase()
-        bw = len(BANNER[0])
+        bw = len(self.banner[0])
         y = max(0, H // 2 - 10)
         if W >= bw + 2 and H >= 20:
             x = (W - bw) // 2
-            for i, line in enumerate(BANNER):
+            for i, line in enumerate(self.banner):
                 put(self.scr, y + i, x, line, self.bold)
-            put(self.scr, y + 5, x + bw - len(TAGLINE), TAGLINE, self.norm)
+            tx = x + bw - len(TAGLINE) if bw >= len(TAGLINE) else max(0, (W - len(TAGLINE)) // 2)
+            put(self.scr, y + 5, tx, TAGLINE, self.norm)
             y += 7
         else:
-            put(self.scr, y, max(0, (W - len(SYSTEM_NAME)) // 2), SYSTEM_NAME, self.bold)
+            put(self.scr, y, max(0, (W - len(self.name)) // 2), self.name, self.bold)
             y += 2
 
         w = min(W, 50)
@@ -328,7 +321,7 @@ class LoginScreen:
         for s in range(steps + 1):
             self.draw(busy=label)
             filled = bar_w * s // steps
-            y = max(0, H // 2 - 10) + (7 if H >= 20 and W >= len(BANNER[0]) + 2 else 2) + 10
+            y = max(0, H // 2 - 10) + (7 if H >= 20 and W >= len(self.banner[0]) + 2 else 2) + 10
             x = (W - bar_w) // 2
             put(self.scr, y, x, self.B["block"] * filled, self.bold)
             put(self.scr, y, x + filled, self.B["shade"] * (bar_w - filled), self.dim)
@@ -405,9 +398,10 @@ def user_settings(user):
         home = pwd.getpwnam(user).pw_dir
         with open(os.path.join(home, ".config", "retromenu", "config.json")) as f:
             cfg = json.load(f)
-        return cfg.get("theme", "green"), cfg.get("effects", "subtle"), cfg.get("box_style", "auto")
+        return (cfg.get("theme", "green"), cfg.get("effects", "subtle"), cfg.get("box_style", "auto"),
+                titlefont.clean(cfg.get("title")))
     except (KeyError, OSError, ValueError, AttributeError):
-        return "green", "subtle", "auto"
+        return "green", "subtle", "auto", titlefont.DEFAULT
 
 
 def main():
@@ -433,8 +427,8 @@ def main():
     except locale.Error:
         locale.setlocale(locale.LC_ALL, "C")
 
-    theme, effects, box_style = user_settings(default_user)
-    user, verified = curses.wrapper(lambda scr: LoginScreen(scr, default_user, theme, effects, box_style).run())
+    theme, effects, box_style, name = user_settings(default_user)
+    user, verified = curses.wrapper(lambda scr: LoginScreen(scr, default_user, theme, effects, box_style, name).run())
     if verified:
         # login -f skips its own password prompt (we already checked) and
         # sets up the session, utmp, HOME and the user's shell.

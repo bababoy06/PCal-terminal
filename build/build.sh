@@ -81,7 +81,7 @@ rm -rf build/work dist
 # shellcheck disable=SC2086
 set -- --noconfirm --clean --log-level WARN --name pontes --strip \
     --paths retromenu --hidden-import retromenu --hidden-import retrologin --hidden-import retroinstall \
-    --hidden-import screen --hidden-import crt --hidden-import vt --hidden-import psf --hidden-import deck \
+    --hidden-import screen --hidden-import crt --hidden-import vt --hidden-import psf --hidden-import deck --hidden-import title \
     $NUMPY --workpath build/work --specpath build/work $EXCLUDES
 
 "$PY" -m PyInstaller "$@" --onedir --distpath dist/onedir retromenu/pontes.py

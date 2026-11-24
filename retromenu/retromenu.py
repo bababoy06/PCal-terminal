@@ -33,9 +33,11 @@ import textwrap
 import time
 
 VERSION = "0.7"
-SYSTEM_NAME = "PONTES-CALOS"
+import title as titlefont  # noqa: E402  (the big title's letters, shared with the login screen)
+
+SYSTEM_NAME = titlefont.DEFAULT
 SHORT_NAME = "PCal"
-TAGLINE = f"PCAL {VERSION} -- A PONTES-CALOS SYSTEM"
+TAGLINE = titlefont.tagline(VERSION)  # stays the same whatever the title says
 COPYRIGHT = "(C) PONTES-CALOS DATA SYSTEMS"
 
 CONFIG_DIR = os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"), "retromenu")
@@ -87,27 +89,14 @@ THEMES = {
     "cyan": (curses.COLOR_CYAN, (80, 159, 30), ("000a0c", "33e0ff", "c0f6ff", "1a6070")),
 }
 
-# A small figlet-style font, so the banner works in plain ASCII.
-FONT = {
-    "P": [" ___ ", "| _ \\", "|  _/", "|_|  "],
-    "O": ["  ___  ", " / _ \\ ", "| (_) |", " \\___/ "],
-    "N": [" _  _ ", "| \\| |", "| .` |", "|_|\\_|"],
-    "T": [" _____ ", "|_   _|", "  | |  ", "  |_|  "],
-    "E": [" ___ ", "| __|", "| _| ", "|___|"],
-    "S": [" ___ ", "/ __|", "\\__ \\", "|___/"],
-    "C": ["  ___ ", " / __|", "| (__ ", " \\___|"],
-    "A": ["   _   ", "  /_\\  ", " / _ \\ ", "/_/ \\_\\"],
-    "L": [" _    ", "| |   ", "| |__ ", "|____|"],
-    "-": ["    ", " __ ", "|__|", "    "],
-    " ": ["  ", "  ", "  ", "  "],
-}
+def tagline_x(x, bw, W):
+    """Where the tagline goes: right-aligned under the title, or centred under a short one."""
+    if bw >= len(TAGLINE):
+        return x + bw - len(TAGLINE)
+    return max(0, (W - len(TAGLINE)) // 2)
 
 
-def render_banner(text):
-    return ["".join(FONT[c][row] for c in text if c in FONT) for row in range(4)]
-
-
-BANNER = render_banner(SYSTEM_NAME)
+BANNER = titlefont.render(SYSTEM_NAME)
 
 UNICODE_CHARS = dict(tl="╔", tr="╗", bl="╚", br="╝", h="═", v="║", lt="╠", rt="╣",
                      tt="╦", bt="╩", x="╬", ptr="►", sub="»", up="▲", down="▼",
@@ -744,14 +733,16 @@ class App:
     # ---- screen furniture
     def draw_header(self, H, W, info=True):
         """Big banner + tagline when there is room. Returns the next free row."""
-        if H >= 26 and W >= len(BANNER[0]) + 4:
-            x = (W - len(BANNER[0])) // 2
-            for i, line in enumerate(BANNER):
+        banner, name = self.banner(), self.title()
+        bw = len(banner[0])
+        if H >= 26 and W >= bw + 4:
+            x = (W - bw) // 2
+            for i, line in enumerate(banner):
                 put(self.scr, 1 + i, x, line, self.bold)
-            put(self.scr, 5, x + len(BANNER[0]) - len(TAGLINE), TAGLINE, self.norm)
+            put(self.scr, 5, tagline_x(x, bw, W), TAGLINE, self.norm)
             y = 7
         else:
-            put(self.scr, 0, 1, f"PCAL {VERSION} :: A PONTES-CALOS SYSTEM"[: W - 2], self.bold)
+            put(self.scr, 0, 1, f"{name} :: PCAL {VERSION}"[: W - 2], self.bold)
             y = 1
         if info:
             line = f"USER {self.user}  HOST {self.host}  {sysinfo()}"
@@ -1408,6 +1399,7 @@ class App:
 
         def build():
             return [
+                item("Title", self.set_title, desc=self.title() + "  (the big name; the PCal line stays)"),
                 item("Theme", desc=c["theme"].upper(),
                      sub=lambda: [item(t.upper(), lambda t=t: self.set("theme", t)) for t in THEMES]),
                 item("Monitor name", lambda: self.edit("monitor_name", "Name in main menu"),
@@ -1443,6 +1435,23 @@ class App:
             ]
 
         self.menu_screen("SETTINGS", build, headers=("SETTING", "VALUE"))
+
+    def title(self):
+        return titlefont.clean(self.cfg.get("title"))
+
+    def banner(self):
+        return titlefont.render(self.title())
+
+    def set_title(self):
+        text = self.prompt(f"TITLE (letters, digits, space - . ! /, up to {titlefont.MAX_LEN})", self.title())
+        if text is None:
+            return
+        cleaned = titlefont.clean(text)
+        if cleaned == titlefont.DEFAULT:
+            self.cfg.pop("title", None)
+            self.set("theme", self.cfg.get("theme", "green"))  # saves
+        else:
+            self.set("title", cleaned)
 
     def screen_fx(self, name):
         """Is this graphical-screen effect on? (set one by one, or else by the Effects level)"""
@@ -1556,16 +1565,17 @@ class App:
     def draw_splash(self, log, progress, typed=None, refresh=True):
         H, W = self.scr.getmaxyx()
         self.scr.erase()
-        bw = len(BANNER[0])
+        banner = self.banner()
+        bw = len(banner[0])
         y = max(0, H // 2 - 9)
         if W >= bw + 2:
             x = (W - bw) // 2
-            for j, line in enumerate(BANNER):
+            for j, line in enumerate(banner):
                 put(self.scr, y + j, x, line, self.bold)
-            put(self.scr, y + 5, x + bw - len(TAGLINE), TAGLINE, self.norm)
+            put(self.scr, y + 5, tagline_x(x, bw, W), TAGLINE, self.norm)
         else:
             x = 1
-            put(self.scr, y, 1, SYSTEM_NAME, self.bold)
+            put(self.scr, y, 1, self.title(), self.bold)
         lx = max(1, (W - 44) // 2)
         for j, (label, result) in enumerate(log):
             dots = "." * max(2, 30 - len(label))

@@ -223,14 +223,14 @@ else
             cp "$SRC"/retromenu/plugins/*.json "$TMP/src/plugins/" 2>/dev/null || true
         else
             say "downloading the Python source"
-            for f in pontes retromenu retrologin retroinstall screen crt vt psf deck; do
+            for f in pontes retromenu retrologin retroinstall screen crt vt psf deck title; do
                 wget -q -O "$TMP/src/$f.py" "$REPO_RAW/retromenu/$f.py" \
                     || die "download failed. Is the repository public? You can also git clone it and run distro/install.sh"
             done
             mkdir -p "$TMP/src/plugins"
             wget -q -O "$TMP/src/plugins/network.json" "$REPO_RAW/retromenu/plugins/network.json" 2>/dev/null || true
         fi
-        for f in pontes retromenu retrologin screen crt vt psf deck; do
+        for f in pontes retromenu retrologin screen crt vt psf deck title; do
             python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$TMP/src/$f.py" \
                 || die "$f.py is damaged, not installing it"
         done
