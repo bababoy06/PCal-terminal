@@ -4,7 +4,7 @@
 # Pontes-Calos installer: turns a fresh Alpine Linux install into a RetroMenu machine.
 #
 #   doas sh distro/install.sh [options] [USER]
-#   wget -qO- https://raw.githubusercontent.com/bababoy06/Pontes-Calos/main/distro/install.sh | sh
+#   wget -qO- https://raw.githubusercontent.com/bababoy06/PCal-terminal/main/distro/install.sh | sh
 #
 # What it does (all reversible with --uninstall):
 #   - installs the latest release build of Pontes-Calos (no Python needed) to
@@ -16,8 +16,8 @@
 #   - UTF-8 console with the Terminus font, so the boxes draw properly
 set -eu
 
-REPO_RAW="https://raw.githubusercontent.com/bababoy06/Pontes-Calos/main"
-RELEASE_URL="https://github.com/bababoy06/Pontes-Calos/releases/latest/download"
+REPO_RAW="https://raw.githubusercontent.com/bababoy06/PCal-terminal/main"
+RELEASE_URL="https://github.com/bababoy06/PCal-terminal/releases/latest/download"
 ROOT="${ROOT:-}"  # only for testing in a fake root
 BIN="$ROOT/usr/local/bin/retromenu"
 LOGIN_BIN="$ROOT/usr/local/bin/retrologin"

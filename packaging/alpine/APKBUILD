@@ -5,14 +5,14 @@ pkgname=pcal
 pkgver=0.6
 pkgrel=3
 pkgdesc="PCal (Pontes-Calos): retro green-CRT home menu and login screen"
-url="https://github.com/bababoy06/Pontes-Calos"
+url="https://github.com/bababoy06/PCal-terminal"
 arch="x86_64"
 license="GPL-3.0-or-later"
 depends="ncurses-terminfo-base doas less file terminus-font"
 # The release build is a PyInstaller bundle with its own Python and libraries:
 # don't strip it and don't turn its bundled libraries into package dependencies.
 options="!check !strip !tracedeps"
-source="pontes-calos-linux-$arch-musl-$pkgver.tar.gz::https://github.com/bababoy06/Pontes-Calos/releases/download/v$pkgver/pontes-calos-linux-$arch-musl.tar.gz
+source="pontes-calos-linux-$arch-musl-$pkgver.tar.gz::https://github.com/bababoy06/PCal-terminal/releases/download/v$pkgver/pontes-calos-linux-$arch-musl.tar.gz
 	LICENSE
 	pcal.profile.sh
 	pcal-setup
