@@ -1,5 +1,8 @@
 # The PCal ISO
 
+> To install PCal, see the [installation guide](../docs/installation.md). To build the ISO, see the
+> [development guide](../docs/development.md#5-build-the-iso). This page explains what is on the ISO.
+
 A bootable image that starts straight into the PCal menu (a *live* system running
 from memory) and can install PCal onto a computer's disk.
 
@@ -21,14 +24,14 @@ sh packaging/alpine/build-apk.sh     # 2. the pcal package
 sh iso/build-iso.sh                  # 3. the ISO
 ```
 
-Result: `dist/iso/pcal-0.6-x86_64.iso` (+ `.sha256`).
+Result: `dist/iso/pcal-VERSION-x86_64.iso` (+ `.sha256`).
 
 ### Two kinds of ISO
 
 | Command | ISO | For | Free space while building |
 |---|---|---|---|
-| `sh iso/build-iso.sh` | `pcal-0.6-x86_64.iso` | real PCs and laptops (Alpine *standard*: firmware for Wi-Fi, graphics, ...) | about **6 GB** |
-| `sh iso/build-iso.sh --virt` | `pcal-virt-0.6-x86_64.iso` | virtual machines only (Alpine *virt*: small VM kernel, no firmware) | about **1.5 GB** |
+| `sh iso/build-iso.sh` | `pcal-VERSION-x86_64.iso` | real PCs and laptops (Alpine *standard*: firmware for Wi-Fi, graphics, ...) | about **6 GB** |
+| `sh iso/build-iso.sh --virt` | `pcal-virt-VERSION-x86_64.iso` | virtual machines only (Alpine *virt*: small VM kernel, no firmware) | about **1.5 GB** |
 
 For testing in VirtualBox/Hyper-V/QEMU, `--virt` is quicker and much smaller. The script checks
 the free space before it starts, and removes its multi-GB work files when done or when it fails.
