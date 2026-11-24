@@ -8,6 +8,7 @@ pontes - PCal (Pontes-Calos) multi-call program (like busybox).
   pontes login [args]      the RetroLogin screen       (also: symlink named retrologin)
   pontes install [args]    the PCal installer           (also: symlink named pcal-install)
   pontes screen [args]     the graphical CRT screen      (also: symlink named pcal-screen)
+  pontes title [args]      show or set the big title (--system NAME as root)
   pontes --version
 
 During development run the .py files directly; releases freeze this file
@@ -16,7 +17,8 @@ into a single program that doesn't need Python installed.
 import os
 import sys
 
-COMMANDS = {"menu": "retromenu", "login": "retrologin", "install": "retroinstall", "screen": "screen"}
+COMMANDS = {"menu": "retromenu", "login": "retrologin", "install": "retroinstall", "screen": "screen",
+            "title": "title"}
 ALIASES = {"retromenu": "menu", "retrologin": "login", "pcal-install": "install", "retroinstall": "install",
            "pcal-screen": "screen"}
 
@@ -46,6 +48,9 @@ def main():
     if cmd == "screen":
         import screen
         return screen.entry(args)
+    if cmd == "title":
+        import title
+        return title.entry(args)
     import retroinstall
     return retroinstall.entry()
 
