@@ -145,6 +145,7 @@ fi
 
 if [ "$MODE" = package ]; then
     LOGIN_PATH=/usr/bin/retrologin
+    PONTES_PATH=/usr/bin/pontes
     # earlier versions of this installer put copies in /usr/local, which would hide the package's programs
     for f in "$BIN" "$LOGIN_BIN" "$PONTES_BIN"; do
         case "$(readlink "$f" 2>/dev/null)" in
@@ -163,6 +164,7 @@ if [ "$MODE" = package ]; then
     say "using the pcal package: $VERSION"
 else
     LOGIN_PATH=/usr/local/bin/retrologin
+    PONTES_PATH=/usr/local/bin/pontes
     TMP=$(mktemp -d)
     trap 'rm -rf "$TMP"' EXIT
     ARCH=$(uname -m)
@@ -188,7 +190,7 @@ else
 
     # ---- packages (the release build has Python inside, so it doesn't need python3)
     PACKAGES="ncurses-terminfo-base doas less file terminus-font"
-    [ "$MODE" = binary ] || PACKAGES="python3 $PACKAGES"
+    [ "$MODE" = binary ] || PACKAGES="python3 py3-numpy $PACKAGES"  # numpy: the graphical screen
     say "installing packages ($PACKAGES)"
     # shellcheck disable=SC2086
     apk add --no-cache $PACKAGES >/dev/null || die "apk failed: check your network and /etc/apk/repositories"
@@ -221,14 +223,14 @@ else
             cp "$SRC"/retromenu/plugins/*.json "$TMP/src/plugins/" 2>/dev/null || true
         else
             say "downloading the Python source"
-            for f in pontes retromenu retrologin; do
+            for f in pontes retromenu retrologin retroinstall screen crt vt psf deck; do
                 wget -q -O "$TMP/src/$f.py" "$REPO_RAW/retromenu/$f.py" \
                     || die "download failed. Is the repository public? You can also git clone it and run distro/install.sh"
             done
             mkdir -p "$TMP/src/plugins"
             wget -q -O "$TMP/src/plugins/network.json" "$REPO_RAW/retromenu/plugins/network.json" 2>/dev/null || true
         fi
-        for f in pontes retromenu retrologin; do
+        for f in pontes retromenu retrologin screen crt vt psf deck; do
             python3 -c 'import ast, sys; ast.parse(open(sys.argv[1]).read())' "$TMP/src/$f.py" \
                 || die "$f.py is damaged, not installing it"
         done
@@ -252,6 +254,9 @@ else
     done
     say "installed $VERSION -> /usr/local/bin/retromenu, retrologin, pontes"
 fi
+
+# ---- the graphical screen needs the framebuffer (/dev/fb0) when started by hand
+addgroup "$TARGET" video >/dev/null 2>&1 || true
 
 # ---- reboot / power off from the menu without a password
 mkdir -p "$(dirname "$DOAS_RULE")"
@@ -288,8 +293,10 @@ touch "$PROFILE"
 remove_profile_block
 cat >>"$PROFILE" <<EOF
 $MARK_BEGIN
-# Pontes-Calos home menu on tty1. Other ttys (Alt+F2...) stay a normal login.
-if [ "\$(tty)" = /dev/tty1 ] && [ -z "\${RETROMENU:-}" ]; then
+# Pontes-Calos home menu on tty1 (also inside the graphical screen there, which notes
+# its terminal in /run/pcal/screen-tty). Other ttys (Alt+F2...) stay a normal login.
+if { [ "\$(tty)" = /dev/tty1 ] || [ "\$(tty)" = "\$(cat /run/pcal/screen-tty 2>/dev/null)" ]; } \\
+    && [ -z "\${RETROMENU:-}" ]; then
     if retromenu; then exit 0; fi
     echo "RetroMenu stopped with an error. This is a normal shell: type 'exit' to restart the menu."
 fi
@@ -310,8 +317,10 @@ set_tty1() {
 }
 case "$LOGIN_MODE" in
     screen)
-        set_tty1 "$LOGIN_PATH --user $TARGET"
-        say "tty1 shows the RetroLogin screen (backup: /etc/inittab.retromenu.bak)"
+        # pontes screen --tty1: the graphical screen around the login screen, or plain text,
+        # as Settings > Display says (it falls back to text by itself if graphics can't work)
+        set_tty1 "$PONTES_PATH screen --tty1 --user $TARGET -- $LOGIN_PATH --user $TARGET"
+        say "tty1 shows the RetroLogin screen, graphical or text as Settings > Display says (backup: /etc/inittab.retromenu.bak)"
         HASH=$(awk -F: -v u="$TARGET" '$1 == u { print $2 }' "$ROOT/etc/shadow" 2>/dev/null || true)
         case "$HASH" in
             "" | "!"* | "*"*) warn "$TARGET has no password yet, so the login screen can't let them in. Run: passwd $TARGET" ;;

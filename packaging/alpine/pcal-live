@@ -4,8 +4,8 @@
 #
 # pcal-live: what runs on tty1 of the PCal live ISO (from /etc/inittab).
 #
-# On the live ISO (root filesystem in RAM) it starts the PCal menu as root,
-# so the ISO boots straight into PCal. Alpine's installer copies the live
+# On the live ISO (root filesystem in RAM) it starts the PCal menu as root, in the
+# graphical screen, so the ISO boots straight into PCal. Alpine's installer copies the live
 # system's /etc/inittab to the disk, so on an installed system this same line
 # runs again. There it never starts a root menu. Instead:
 #   - first start after the PCal installer: it finds /etc/pcal/firstboot (left
@@ -55,4 +55,6 @@ fi
 export HOME=/root USER=root LOGNAME=root SHELL=/bin/ash
 export TERM="${TERM:-linux}" LANG="${LANG:-C.UTF-8}"
 cd /root 2>/dev/null || cd /
-exec /usr/bin/retromenu
+# The graphical screen around the menu (Settings > Display can switch it to text);
+# without graphics it starts the text menu by itself.
+exec /usr/bin/pontes screen --tty1 -- /usr/bin/retromenu

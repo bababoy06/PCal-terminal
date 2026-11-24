@@ -129,7 +129,22 @@ K_ENTER = (10, 13, curses.KEY_ENTER)
 EXIT = object()  # returned by the "Exit" item to leave the program
 
 STDSCR = []  # the main window, once the program runs
-IN_SCREEN = bool(os.environ.get("PCAL_SCREEN"))  # running inside the graphical screen (pontes screen)
+SCREEN_MARK = "/run/pcal/screen-tty"  # the graphical screen writes the menu's terminal here
+
+
+def in_screen():
+    """Running inside the graphical screen (pontes screen)? Its programs get PCAL_SCREEN=1;
+    after the login screen that is gone (login clears it), so also check the screen's mark."""
+    if os.environ.get("PCAL_SCREEN"):
+        return True
+    try:
+        with open(SCREEN_MARK) as f:
+            return os.ttyname(0) == f.read().strip()
+    except OSError:
+        return False
+
+
+IN_SCREEN = in_screen()
 SCREEN_KEYS = ("theme", "effects", "screen_font", "screen_glow", "screen_scanlines",
                "screen_curvature", "screen_afterglow")
 # Which graphical-screen effects each Effects level switches on (unless set one by one)
@@ -500,6 +515,8 @@ class App:
         self.scr = scr
         STDSCR[:] = [scr]
         self.cfg = load_config()
+        if IN_SCREEN:
+            self.tell_screen("reload")  # so the screen takes this user's look (after the login screen)
         self.plugins = []
         self.bg = lambda: None  # redraws whatever screen is currently below a dialog
         self.host = socket.gethostname().split(".")[0]
@@ -1410,6 +1427,9 @@ class App:
                 item("Effects", desc=self.fx.upper() + "  (CRT power on/off, afterglow)",
                      sub=lambda: [item(v.upper(), lambda v=v: self.set("effects", v))
                                   for v in ("off", "subtle", "full")]),
+                item("Display", desc=self.cfg.get("display", "graphical").upper() + "  (on tty1, from the next login)",
+                     sub=lambda: [item("GRAPHICAL", lambda: self.set("display", "graphical")),
+                                  item("TEXT", lambda: self.set("display", "text"))]),
                 item("Graphical screen", self.screen_settings,
                      desc=("font, glow, scanlines, curvature" if IN_SCREEN else "settings for pontes screen")),
                 item("Console palette", lambda: self.set("console_palette", not c["console_palette"]),

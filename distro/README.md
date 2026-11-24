@@ -48,6 +48,7 @@ Your user needs a password (`setup-alpine` asks for one; otherwise run `passwd j
 ## Safety net
 
 - Only **tty1** uses the login screen. **Alt+F2** to **Alt+F6** are normal password logins, so you can always get in and fix things.
+- tty1 runs in the **graphical screen** (`pontes screen --tty1`) unless Settings › Display is TEXT; it falls back to text by itself when there are no graphics. The menu's Desk modules always run as the user who logged in.
 - If the menu crashes, tty1 drops to a normal shell instead of looping.
 - **Log out** in the menu returns to the login screen. Use **Terminal** for a shell.
 - If the login screen itself ever fails, init simply starts it again, and it never leaves a shell behind.

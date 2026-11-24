@@ -62,12 +62,21 @@ def log(msg):
 SCREEN_EFFECTS = ("glow", "scanlines", "curvature", "afterglow")
 
 
-def load_config():
+MARK_FILE = "/run/pcal/screen-tty"  # which terminal is the menu's inside the graphical screen
+
+
+def load_config(path=None):
     try:
-        with open(CONFIG_FILE) as f:
-            return json.load(f)
+        with open(path or CONFIG_FILE) as f:
+            cfg = json.load(f)
+        return cfg if isinstance(cfg, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def user_config_file(pw):
+    """The menu's settings file of a user (a pwd entry)."""
+    return os.path.join(pw.pw_dir, ".config", "retromenu", "config.json")
 
 
 def resolve(cfg, theme=None, effects=None, font_size=0):
@@ -198,7 +207,10 @@ class Console:
 
 # ---------------------------------------------------------------- the program inside
 class Child:
-    def __init__(self, cmd, rows, cols):
+    def __init__(self, cmd, rows, cols, user=None, mark=False):
+        """user: a pwd entry to run the program as (when the screen runs as root).
+        mark: this is the menu's terminal; written to MARK_FILE so the login shell and the
+        menu can tell they are inside the graphical screen (login clears the environment)."""
         import pty
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
@@ -207,6 +219,21 @@ class Child:
             env.pop("COLUMNS", None)
             env.pop("LINES", None)
             try:
+                if mark and os.geteuid() == 0:
+                    os.makedirs(os.path.dirname(MARK_FILE), exist_ok=True)
+                    with open(MARK_FILE, "w") as f:
+                        f.write(os.ttyname(0) + "\n")
+                if user is not None:
+                    if os.geteuid() == 0 and user.pw_uid != 0:
+                        os.initgroups(user.pw_name, user.pw_gid)
+                        os.setgid(user.pw_gid)
+                        os.setuid(user.pw_uid)
+                    env.update(HOME=user.pw_dir, USER=user.pw_name, LOGNAME=user.pw_name,
+                               SHELL=user.pw_shell or "/bin/sh")
+                    try:
+                        os.chdir(user.pw_dir)
+                    except OSError:
+                        os.chdir("/")
                 os.execvpe(cmd[0], cmd, env)
             except OSError as e:
                 sys.stderr.write(f"{cmd[0]}: {e}\n")
@@ -229,6 +256,42 @@ class Child:
             return os.read(self.fd, 65536)
         except OSError:  # the program has ended
             return b""
+
+    def operator(self):
+        """The user this terminal belongs to now, as a pwd entry, found from the kernel (never
+        from what a program says): whoever logged in through the login screen. Every process
+        started under this terminal's program counts; a non-root one wins (the most recently
+        started), so a user's menu never opens root modules, whatever ran between (login, su,
+        doas). Only when everything under it runs as root (root logged in) is it root."""
+        import pwd
+        procs = {}  # pid -> (parent pid, uid, start time)
+        for d in os.listdir("/proc"):
+            if not d.isdigit():
+                continue
+            try:
+                with open(f"/proc/{d}/stat") as f:
+                    fields = f.read().rsplit(")", 1)[1].split()
+                with open(f"/proc/{d}/status") as f:
+                    u = next(int(line.split()[1]) for line in f if line.startswith("Uid:"))
+                procs[int(d)] = (int(fields[1]), u, int(fields[19]))
+            except (OSError, ValueError, StopIteration, IndexError):
+                continue
+        children = {}
+        for pid, (ppid, _, _) in procs.items():
+            children.setdefault(ppid, []).append(pid)
+        best, todo = None, [self.pid]
+        while todo:
+            pid = todo.pop()
+            if pid in procs:
+                _, u, start = procs[pid]
+                key = (u != 0, start)
+                if best is None or key > best[0]:
+                    best = (key, u)
+            todo.extend(children.get(pid, []))
+        try:
+            return pwd.getpwuid(best[1] if best else os.getuid())
+        except KeyError:
+            return None
 
     def wait(self):
         if self.status is None:
@@ -257,11 +320,18 @@ class Pane:
         self.dec = codecs.getincrementaldecoder("utf-8")("replace")
 
 
+def menu_program():
+    """How to start the PCal menu: the release program, or the Python source."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "menu"]
+    return [sys.executable, os.path.join(HERE, "retromenu.py")]
+
+
 def run(cmd, fb, make, first=None, max_fps=40):
-    """make() -> (renderer, power effect on?), called again when Settings change."""
+    """make(config_file) -> (renderer, power effect on?), called again when Settings change."""
     import vt
-    renderer, effects_on = first or make()
-    menu = Pane(Child(cmd, renderer.rows, renderer.cols), vt.VT(renderer.rows, renderer.cols))
+    renderer, effects_on = first or make(None)
+    menu = Pane(Child(cmd, renderer.rows, renderer.cols, mark=True), vt.VT(renderer.rows, renderer.cols))
     session = Session(cmd, fb, make, renderer, effects_on, menu, max_fps)
     try:
         return session.loop()
@@ -269,6 +339,11 @@ def run(cmd, fb, make, first=None, max_fps=40):
         for p in [menu] + (session.deck.panes() if session.deck else []):
             if p.child.status is None:
                 p.child.stop()
+        if os.geteuid() == 0:
+            try:
+                os.unlink(MARK_FILE)  # that terminal is no longer the menu's
+            except OSError:
+                pass
 
 
 class Session:
@@ -281,14 +356,29 @@ class Session:
         self.deck = None
         self.view = "menu"  # or "deck"
         self.need = True
+        self.user = None    # who uses the menu: Desk modules run as this user
+        self.config_file = None
+        self.opts = make.options(None)
 
     def spawn(self, cmd, rows, cols):
-        return Child(cmd, rows, cols)
+        return Child(cmd, rows, cols, user=self.user)
+
+    def operator(self):
+        """Find out who is using the menu now (after the login screen, that is who logged in)."""
+        pw = self.menu.child.operator()
+        if pw is not None:
+            self.user, self.config_file = pw, user_config_file(pw)
+        return pw
 
     def open_deck(self):
         import deck
+        pw = self.operator()
+        if self.deck is not None and pw is not None and self.deck.owner != pw.pw_uid:
+            for w in list(self.deck.windows):  # someone else logged in: their deck, not the old one
+                self.deck.close(w)
+            self.deck = None
         if self.deck is None:
-            self.deck = deck.Deck(self.renderer, self.cmd, self.spawn, CONFIG_FILE)
+            self.deck = deck.Deck(self.renderer, menu_program(), self.spawn, self.config_file or CONFIG_FILE, pw)
         else:
             self.deck.log("OPERATOR ON DECK")
         self.view = "deck"
@@ -302,7 +392,12 @@ class Session:
 
     def reload(self):
         """Settings changed: a new picture, maybe a new size for every program."""
-        r, self.effects_on = self.make()
+        self.operator()
+        opts = self.make.options(self.config_file)
+        if opts == self.opts:  # nothing that changes the picture (the menu says hello at every start)
+            return
+        self.opts = opts
+        r, self.effects_on = self.make(self.config_file)
         t = self.menu.term
         if (r.rows, r.cols) != (t.rows, t.cols):
             t.resize(r.rows, r.cols)
@@ -508,7 +603,8 @@ def parse_size(s):
 
 
 def text_mode(cmd, why):
-    log(f"{why}; using text mode")
+    if why:
+        log(f"{why}; using text mode")
     try:
         os.execvp(cmd[0], cmd)
     except OSError as e:
@@ -527,21 +623,31 @@ def entry(argv=None):
     ap.add_argument("--fb-file", help="draw into this file instead of a display (testing)")
     ap.add_argument("--size", default="1920x1080", help="size for --fb-file and --bench")
     ap.add_argument("--bench", action="store_true", help="measure drawing speed and exit")
+    ap.add_argument("--tty1", action="store_true",
+                    help="started by the system on tty1: follow Settings > Display (text or graphical)")
+    ap.add_argument("--user", help="with --tty1: whose Display setting counts (default: this user)")
     ap.add_argument("cmd", nargs="*", help="program to run (default: the PCal menu)")
     a = ap.parse_args(argv)
     if a.effects and a.effects not in EFFECTS:
         ap.error(f"--effects: choose off, light or full (not {a.effects!r})")
-    cmd = a.cmd or [sys.executable, os.path.join(HERE, "retromenu.py")]
-    if getattr(sys, "frozen", False) and not a.cmd:
-        cmd = [sys.executable, "menu"]  # the release program: `pontes menu`
+    cmd = a.cmd or menu_program()
+    if a.tty1:
+        import pwd
+        try:
+            pw = pwd.getpwnam(a.user) if a.user else pwd.getpwuid(os.getuid())
+            display = load_config(user_config_file(pw)).get("display", "graphical")
+        except KeyError:
+            display = "graphical"
+        if display == "text":
+            return text_mode(cmd, None)
     try:
         import numpy  # noqa: F401
         import crt
     except ImportError:
         return text_mode(cmd, "numpy is not installed (apk add py3-numpy)")
 
-    def options():
-        return resolve(load_config(), a.theme, a.effects, a.font_size)
+    def options(config_file=None):
+        return resolve(load_config(config_file), a.theme, a.effects, a.font_size)
 
     if a.bench:
         return bench(parse_size(a.size), options(), a.scale, a.font)
@@ -550,13 +656,15 @@ def entry(argv=None):
     except OSError as e:
         return text_mode(cmd, f"no graphical display ({e})")
 
-    def make():
-        o = options()
+    def make(config_file=None):
+        o = options(config_file)
         font, scale = choose_layout(fb.w, fb.h, o["font_size"], a.scale, o["fx"], a.font)
         return crt.Renderer(font, (fb.w, fb.h), scale, o["theme"], o["fx"], fmt=fb.fmt), o["power"]
 
+    make.options = options
+
     try:
-        first = make()  # check that it works before taking over the console
+        first = make(None)  # check that it works before taking over the console
     except OSError as e:
         fb.close()
         return text_mode(cmd, str(e))
