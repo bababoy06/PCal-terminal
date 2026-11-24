@@ -29,7 +29,7 @@ No desktop, no window system: fast, and easy to understand.
 ## Install PCal
 
 1. Build the ISO (see [Building](#building)), or take one from a release.
-2. Boot it in a virtual machine or from a USB stick: it starts straight into the PCal menu.
+2. Boot it in a virtual machine or from a USB stick: it starts straight into the PCal menu, in the graphical CRT screen (text mode if the graphics can't work; Settings › Display switches).
 3. Choose **Install PCal** and answer the questions: keyboard, computer name, time zone, network, SSH, your user and password, root password, disk (type `YES` to erase it).
 4. Remove the ISO and reboot. On the first start PCal finishes its setup by itself, then shows the login screen.
 
@@ -63,7 +63,7 @@ Already running Alpine? [`distro/install.sh`](distro/README.md) (`pcal-setup`) t
 Everything is built on Alpine (a VM is fine), as your normal user. The guides have the one-time setup.
 
 ```sh
-sh build/build.sh                   # 1. the program (no Python needed to run it)
+sh build/build.sh                   # 1. the program (no Python needed to run it; apk add py3-numpy first, for the graphical screen)
 sh packaging/alpine/build-apk.sh    # 2. the pcal package          → dist/apk/pcal/
 sh iso/build-iso.sh --virt          # 3. the ISO for VMs           → dist/iso/pcal-virt-*.iso
 sh iso/build-iso.sh                 #    or for real PCs (needs ~6 GB free while building)

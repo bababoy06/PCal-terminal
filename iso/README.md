@@ -54,7 +54,9 @@ come from the Alpine mirror, and takes a few minutes. The ISO uses the same Alpi
 
 ## Using it
 
-1. Boot the ISO in a VM (or from a USB stick). The boot screen and PCal menu appear on their own.
+1. Boot the ISO in a VM (or from a USB stick). The boot screen and PCal menu appear on their own, in the
+   graphical screen (in VirtualBox set Display › Graphics Controller to VMSVGA). Without usable graphics it
+   simply starts in text mode; Settings › Display switches between the two.
 2. Choose **Install PCal**. The PCal installer asks, step by step:
    keyboard layout (switched on right away) · computer name · time zone · network (wired, DHCP) ·
    SSH server yes/no · your user name and password · root password · the disk (type `YES` to erase it).

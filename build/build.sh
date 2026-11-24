@@ -25,7 +25,7 @@ die() {
 }
 
 if [ -f /etc/alpine-release ]; then
-    TOOLS_HINT="apk add python3 py3-pip binutils build-base zlib-dev python3-dev"
+    TOOLS_HINT="apk add python3 py3-pip py3-numpy binutils build-base zlib-dev python3-dev"
 else
     TOOLS_HINT="sudo apt install python3-venv binutils   (Debian/Ubuntu)"
 fi
@@ -43,10 +43,26 @@ else
     if ! "$PY" -m PyInstaller --version >/dev/null 2>&1; then
         echo "first build: setting up $VENV with PyInstaller (one time, needs internet)"
         rm -rf "$VENV"
-        python3 -m venv "$VENV" || die "could not create $VENV. Install the build tools: $TOOLS_HINT"
+        # --system-site-packages: the venv also sees the system's numpy (apk add py3-numpy),
+        # which the graphical screen needs and PyInstaller then puts in the release
+        python3 -m venv --system-site-packages "$VENV" || die "could not create $VENV. Install the build tools: $TOOLS_HINT"
         "$VENV/bin/pip" install --quiet --disable-pip-version-check pyinstaller \
             || die "pip could not install PyInstaller (no internet? missing compiler? $TOOLS_HINT)"
     fi
+fi
+
+# A venv made by an older build.sh can't see the system's numpy yet: let it.
+if [ "$PY" = "$VENV/bin/python" ] && [ -f "$VENV/pyvenv.cfg" ] && ! "$PY" -c 'import numpy' 2>/dev/null \
+    && python3 -c 'import numpy' 2>/dev/null; then
+    sed -i 's/^include-system-site-packages = false/include-system-site-packages = true/' "$VENV/pyvenv.cfg"
+fi
+if "$PY" -c 'import numpy' 2>/dev/null; then
+    NUMPY="--hidden-import numpy"
+    echo "numpy found: the release includes the graphical screen"
+else
+    NUMPY=""
+    echo "WARNING: numpy not found, so the release's graphical screen falls back to text mode."
+    [ -f /etc/alpine-release ] && echo "         Install it and build again:  doas apk add py3-numpy"
 fi
 
 VERSION=$("$PY" -c 'import re; print(re.search(r"VERSION = \"([^\"]+)\"", open("retromenu/retromenu.py").read()).group(1))')
@@ -65,8 +81,8 @@ rm -rf build/work dist
 # shellcheck disable=SC2086
 set -- --noconfirm --clean --log-level WARN --name pontes --strip \
     --paths retromenu --hidden-import retromenu --hidden-import retrologin --hidden-import retroinstall \
-    --hidden-import screen --hidden-import crt --hidden-import vt --hidden-import psf \
-    --workpath build/work --specpath build/work $EXCLUDES
+    --hidden-import screen --hidden-import crt --hidden-import vt --hidden-import psf --hidden-import deck \
+    $NUMPY --workpath build/work --specpath build/work $EXCLUDES
 
 "$PY" -m PyInstaller "$@" --onedir --distpath dist/onedir retromenu/pontes.py
 "$PY" -m PyInstaller "$@" --onefile --distpath dist/onefile retromenu/pontes.py

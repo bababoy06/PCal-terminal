@@ -61,8 +61,9 @@ class Window:
 
 
 class Deck:
-    def __init__(self, renderer, menu_cmd, spawn, config_file):
-        """spawn(cmd, rows, cols) -> a running Child (see screen.py)."""
+    def __init__(self, renderer, menu_cmd, spawn, config_file, user=None):
+        """spawn(cmd, rows, cols) -> a running Child (see screen.py); user: the operator's pwd entry."""
+        self.pw = user
         self.menu_cmd, self.spawn, self.config_file = menu_cmd, spawn, config_file
         self.windows = []          # open modules, in the order they were opened
         self.shown = None          # the window on screen (None: no module open)
@@ -72,11 +73,15 @@ class Deck:
         self.textcache = {}
         self.stats, self.stats_at = {}, 0.0
         self.status = None
-        try:
-            import pwd
-            self.user = pwd.getpwuid(os.getuid()).pw_name
-        except (ImportError, KeyError):
-            self.user = os.environ.get("USER") or "operator"
+        self.owner = user.pw_uid if user else os.getuid()
+        if user:
+            self.user = user.pw_name
+        else:
+            try:
+                import pwd
+                self.user = pwd.getpwuid(os.getuid()).pw_name
+            except (ImportError, KeyError):
+                self.user = os.environ.get("USER") or "operator"
         self.log("OPERATOR ON DECK")
         self.set_renderer(renderer)
 
@@ -107,7 +112,8 @@ class Deck:
                 cfg = json.load(f)
         except (OSError, ValueError):
             cfg = {}
-        shell = shlex.split(cfg.get("shell") or os.environ.get("SHELL") or "/bin/sh") or ["/bin/sh"]
+        default_shell = (self.pw.pw_shell if self.pw else None) or os.environ.get("SHELL") or "/bin/sh"
+        shell = shlex.split(cfg.get("shell") or default_shell) or ["/bin/sh"]
         mon = cfg.get("monitor_cmd") or "top"
         mods = [
             ("01", "TERMINAL", shell),
