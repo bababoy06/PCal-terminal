@@ -89,6 +89,13 @@ THEMES = {
     "cyan": (curses.COLOR_CYAN, (80, 159, 30), ("000a0c", "33e0ff", "c0f6ff", "1a6070")),
 }
 
+def pontes_program():
+    """How to start `pontes` again (the release program, or the Python source)."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable]
+    return [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "pontes.py")]
+
+
 def tagline_x(x, bw, W):
     """Where the tagline goes: right-aligned under the title, or centred under a short one."""
     if bw >= len(TAGLINE):
@@ -1399,7 +1406,8 @@ class App:
 
         def build():
             return [
-                item("Title", self.set_title, desc=self.title() + "  (the big name; the PCal line stays)"),
+                item("Title", self.set_title, desc=self.title() + ("" if c.get("title") else "  (SYSTEM)")
+                     + "  the big name; the PCal line stays"),
                 item("Theme", desc=c["theme"].upper(),
                      sub=lambda: [item(t.upper(), lambda t=t: self.set("theme", t)) for t in THEMES]),
                 item("Monitor name", lambda: self.edit("monitor_name", "Name in main menu"),
@@ -1437,21 +1445,47 @@ class App:
         self.menu_screen("SETTINGS", build, headers=("SETTING", "VALUE"))
 
     def title(self):
-        return titlefont.clean(self.cfg.get("title"))
+        return titlefont.user_title(self.cfg)
 
     def banner(self):
         return titlefont.render(self.title())
 
     def set_title(self):
-        text = self.prompt(f"TITLE (letters, digits, space - . ! /, up to {titlefont.MAX_LEN})", self.title())
-        if text is None:
-            return
-        cleaned = titlefont.clean(text)
-        if cleaned == titlefont.DEFAULT:
+        """Settings > Title: my own title, and the system title (admins)."""
+        hint = f"letters, digits, space - . ! /, up to {titlefont.MAX_LEN}"
+
+        def mine():
+            text = self.prompt(f"MY TITLE ({hint})", self.title())
+            if text is not None:
+                self.set("title", titlefont.clean(text))
+
+        def use_system():
             self.cfg.pop("title", None)
-            self.set("theme", self.cfg.get("theme", "green"))  # saves
-        else:
-            self.set("title", cleaned)
+            save_config(self.cfg)
+
+        def system():
+            text = self.prompt(f"SYSTEM TITLE ({hint})", titlefont.system_title())
+            if text is None:
+                return
+            name = titlefont.clean(text)
+            if os.geteuid() == 0:
+                titlefont.set_system_title(name)
+                return
+            # not root: let doas ask for this user's password (members of wheel may)
+            self.run(["doas"] + pontes_program() + ["title", "--system", name], pause=True,
+                     note="Changing the system title needs root: doas asks for your password.")
+
+        def build():
+            own = self.cfg.get("title")
+            return [
+                item("My title", mine, desc=(titlefont.clean(own) if own else titlefont.system_title() + "  (SYSTEM)")
+                     + "  your menu and splash"),
+                item("Use the system title", use_system, desc="forget my own title"),
+                item("System title", system, desc=titlefont.system_title()
+                     + "  login screen, everyone's default (admin)"),
+            ]
+
+        self.menu_screen("TITLE", build, headers=("SETTING", "VALUE"))
 
     def screen_fx(self, name):
         """Is this graphical-screen effect on? (set one by one, or else by the Effects level)"""

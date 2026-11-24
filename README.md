@@ -21,7 +21,7 @@ No desktop, no window system: fast, and easy to understand.
 - **RetroLogin**: the login screen on tty1. It checks your password like the normal login, and slows down guessing.
 - **PCal installer** on the ISO: Alpine's own setup with PCal's screens.
 - **The Desk** (in the graphical screen): a command deck with numbered modules that open in a window, live system meters, an event log and a taskbar.
-- **Looks**: your own big title (Settings › Title; the PCal line under it stays); green, amber, white or cyan themes; double, single or ASCII boxes; CRT power on/off, phosphor afterglow, typewriter text; on the real Linux console, PCal repaints the console's own colours.
+- **Looks**: your own big title (Settings › Title: a system title for the login screen and everyone, and each user's own; the PCal line under it stays); green, amber, white or cyan themes; double, single or ASCII boxes; CRT power on/off, phosphor afterglow, typewriter text; on the real Linux console, PCal repaints the console's own colours.
 - **Light**: the release build needs no Python on the system, and the status panel reads `/proc` and `/sys` without starting programs.
 
 ![The SYSTEM STATUS panel next to the menu](docs/media/status-panel.png)
