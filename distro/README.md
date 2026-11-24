@@ -1,5 +1,8 @@
 # Pontes-Calos on Alpine Linux
 
+> For a step-by-step installation, including the ISO and the release package, see the
+> [installation guide](../docs/installation.md). This page documents `install.sh` (`pcal-setup`) itself.
+
 Turns a fresh Alpine install into a machine that boots into the RetroLogin screen and then RetroMenu.
 Alpine is tiny (about 130 MB installed with Python), boots in a few seconds and uses OpenRC + BusyBox, so there's very little to slow it down.
 
@@ -17,7 +20,7 @@ Log in as root, then run either:
 ```sh
 apk add git
 git clone https://github.com/bababoy06/PCal-terminal
-sh Pontes-Calos/distro/install.sh --fast-boot
+sh PCal-terminal/distro/install.sh --fast-boot
 ```
 
 or, if the repository is public, without git:

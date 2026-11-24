@@ -1,5 +1,9 @@
 # PCal as an Alpine package
 
+> Released packages are on the [releases page](https://github.com/bababoy06/PCal-terminal/releases);
+> see the [installation guide](../../docs/installation.md#5-install-on-an-existing-alpine-system).
+> Building is covered in the [development guide](../../docs/development.md#4-build-the-release-program-and-the-package).
+
 This turns the PCal release build into an ordinary Alpine package, `pcal-VERSION-r0.apk`.
 It's step 1 towards the PCal ISO: Alpine's ISO builder (`mkimage`) puts packages on the image,
 so PCal has to be one. Bonus: once PCal is a package, updating is just `apk upgrade`.
@@ -41,13 +45,13 @@ sh build/build.sh                    # the release build (if you don't have it y
 sh packaging/alpine/build-apk.sh     # the package
 ```
 
-Result: `dist/apk/pcal/x86_64/pcal-0.6-rNUMBER.apk`, where NUMBER is the build time (e.g. `r2611221432`), so each build is newer than the last, plus a signed `APKINDEX.tar.gz` next to it.
+Result: `dist/apk/pcal/x86_64/pcal-VERSION-rNUMBER.apk`, where NUMBER is the build time (e.g. `r2611221432`), so each build is newer than the last, plus a signed `APKINDEX.tar.gz` next to it.
 `dist/apk/pcal` is a complete little apk repository.
 
 Install it on the same machine:
 
 ```sh
-doas apk add --allow-untrusted dist/apk/pcal/x86_64/pcal-0.6-r2611221432.apk   # the file build-apk.sh printed;
+doas apk add --allow-untrusted dist/apk/pcal/x86_64/pcal-VERSION-rNUMBER.apk   # the file build-apk.sh printed;
                                                                          # installs, or upgrades an older build
 pontes --version
 ```
