@@ -3,11 +3,25 @@
 """
 The big title on the menu, the boot splash and the login screen.
 
-The text can be changed in Settings > Title (letters, digits, space and - . ! /);
-the line under it, with the PCal version, stays the same. The letters are a small
+Two levels, like the rest of a shared computer:
+  system title   set by an admin, in /etc/pcal/config.json: the login screen always shows
+                 it, and it is everyone's title until they choose their own
+  my title       each user's own, in ~/.config/retromenu/config.json: their menu and splash
+
+Change them in Settings > Title, or with:
+  pontes title                      show both
+  pontes title --system NAME        set the system title (as root, e.g. with doas)
+  pontes title --system --reset     back to PONTES-CALOS
+
+The line under the title, with the PCal version, never changes. The letters are a small
 figlet-style font in plain ASCII, 4 rows high, so they work on every screen.
 """
+import json
+import os
+import sys
+
 DEFAULT = "PONTES-CALOS"
+SYSTEM_CONFIG = "/etc/pcal/config.json"
 MAX_LEN = 16
 TAGLINE = "PCAL {version} -- A PONTES-CALOS SYSTEM"
 
@@ -70,3 +84,60 @@ def render(text):
 
 def tagline(version):
     return TAGLINE.format(version=version)
+
+
+def _read(path):
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def system_title():
+    """The admin's title (the login screen's, and everyone's default)."""
+    return clean(_read(SYSTEM_CONFIG).get("title"))
+
+
+def user_title(cfg):
+    """What a user's menu shows: their own title, or else the system title."""
+    own = (cfg or {}).get("title")
+    return clean(own) if own else system_title()
+
+
+def set_system_title(name):
+    """Write the system title (root only). None or the default removes it."""
+    data = _read(SYSTEM_CONFIG)
+    name = clean(name) if name else DEFAULT
+    if name == DEFAULT:
+        data.pop("title", None)
+    else:
+        data["title"] = name
+    os.makedirs(os.path.dirname(SYSTEM_CONFIG), exist_ok=True)
+    tmp = SYSTEM_CONFIG + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, SYSTEM_CONFIG)
+    return name
+
+
+def entry(argv=None):
+    """pontes title [--system NAME | --system --reset]"""
+    args = list(sys.argv[1:] if argv is None else argv)
+    if not args:
+        own = _read(os.path.join(os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+                                 "retromenu", "config.json")).get("title")
+        print(f"system title: {system_title()}")
+        print(f"my title:     {clean(own) if own else '(the system title)'}")
+        return 0
+    if args[0] != "--system" or len(args) < 2:
+        print(__doc__.strip())
+        return 2
+    if os.geteuid() != 0:
+        print("only root can change the system title: try  doas pontes title --system ...", file=sys.stderr)
+        return 1
+    name = None if args[1] == "--reset" else " ".join(args[1:])
+    print(f"system title: {set_system_title(name)}")
+    return 0

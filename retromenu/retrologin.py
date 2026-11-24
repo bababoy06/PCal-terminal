@@ -398,10 +398,9 @@ def user_settings(user):
         home = pwd.getpwnam(user).pw_dir
         with open(os.path.join(home, ".config", "retromenu", "config.json")) as f:
             cfg = json.load(f)
-        return (cfg.get("theme", "green"), cfg.get("effects", "subtle"), cfg.get("box_style", "auto"),
-                titlefont.clean(cfg.get("title")))
+        return cfg.get("theme", "green"), cfg.get("effects", "subtle"), cfg.get("box_style", "auto")
     except (KeyError, OSError, ValueError, AttributeError):
-        return "green", "subtle", "auto", titlefont.DEFAULT
+        return "green", "subtle", "auto"
 
 
 def main():
@@ -427,7 +426,8 @@ def main():
     except locale.Error:
         locale.setlocale(locale.LC_ALL, "C")
 
-    theme, effects, box_style, name = user_settings(default_user)
+    theme, effects, box_style = user_settings(default_user)
+    name = titlefont.system_title()  # the login screen is everyone's: the admin's title
     user, verified = curses.wrapper(lambda scr: LoginScreen(scr, default_user, theme, effects, box_style, name).run())
     if verified:
         # login -f skips its own password prompt (we already checked) and
